@@ -1,0 +1,22 @@
+# シミュレーションデータ（大容量・数百MB/ファイル）
+data/
+tmp/
+reservoir_data/
+
+# コンパイル済みバイナリ
+vicsek_dynamic
+
+# 解析出力（タイムスタンプサブディレクトリ、スクリプトは除外しない）
+analysis/*/[0-9]*/
+
+# Python キャッシュ
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# エディタ・OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
