@@ -10,10 +10,10 @@ Phase 3: MC/NRMSE vs S を sgm ごとに折れ線プロット
         --sgm-values 0.0 0.1 0.2 0.3 0.4 0.5 \\
         --noise-seeds 1 2 3 4 5 6 7 8 9 10 \\
         --rcut 13 --n-jobs 4 \\
-        --data-dir data/noise_avg_sweep \\
+        --data-dir data \\
         --output-dir analysis/sgm_mean_state \\
-        --input-path  tmp/narma10_input_0.0:0.5_seed666.dat \\
-        --target-path tmp/narma10_target_0.0:0.5_seed666.dat
+        --input-path  narma_data/narma10_input_0.0:0.5_seed666.dat \\
+        --target-path narma_data/narma10_target_0.0:0.5_seed666.dat
 """
 import argparse
 import json
@@ -35,7 +35,10 @@ import pandas as pd
 from vicsek_rc import (
     nrmse, nrmse2, mck_score, ridge_predict,
     load_theta, build_noise_averaged_states, write_params_used,
+    load_reservoir_defaults, find_narma_by_seed,
 )
+
+_RC = load_reservoir_defaults()
 
 BINARY = str(ROOT / "vicsek_dynamic")
 
@@ -53,11 +56,12 @@ def _run_one_sim(args):
         "seed_noise":  noise_seed,
         "seed_pos":    13,
         "seed_nf":     16,
+        "ntime":       140000,
     }
     fd, cfg_path = tempfile.mkstemp(suffix=".json")
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(cfg, f)
+            json.dump(cfg, f, indent=2)
         result = subprocess.run([BINARY, cfg_path], capture_output=True, text=True)
     finally:
         os.unlink(cfg_path)
@@ -115,18 +119,19 @@ def _evaluate_noise_avg(theta_list: list, params: dict,
                         s_values: list,
                         washout: int, train_num: int, k_max: int) -> dict:
     """Evaluate noise-averaged states for each S in s_values."""
-    N         = params["N"]
-    total_num = params["ntime"] // params["utime"]
-    threshold = N / (train_num - washout)
-    results   = {}
+    N              = params["N"]
+    total_num      = params["ntime"] // params["utime"]
+    train_end_frame = washout + train_num
+    threshold      = N / train_num
+    results        = {}
 
     for S in s_values:
         states = build_noise_averaged_states(theta_list[:S])
         length = states.shape[0]
         eval_total = min(total_num, target.shape[0], length)
-        train_end  = min(train_num, eval_total)
+        train_end  = min(train_end_frame, eval_total)
 
-        y_pred    = ridge_predict(states, target, washout, train_num)
+        y_pred    = ridge_predict(states, target, washout, train_end_frame)
         nr_train  = nrmse( target[washout:train_end],    y_pred[washout:train_end])
         nr_test   = nrmse( target[train_end:eval_total], y_pred[train_end:eval_total])
         nr2_train = nrmse2(target[washout:train_end],    y_pred[washout:train_end])
@@ -136,9 +141,9 @@ def _evaluate_noise_avg(theta_list: list, params: dict,
         for delay in range(k_max + 1):
             padded = np.concatenate([np.zeros(delay), col_input])
             tgt    = padded[:length]
-            pred   = ridge_predict(states, tgt, washout, train_num)
-            tr_s   = slice(washout, min(train_num + 1, length))
-            te_s   = slice(min(train_num, length), min(total_num, length))
+            pred   = ridge_predict(states, tgt, washout, train_end_frame)
+            tr_s   = slice(washout, min(train_end_frame + 1, length))
+            te_s   = slice(min(train_end_frame, length), min(total_num, length))
             mck_train_list.append(mck_score(tgt[tr_s], pred[tr_s]))
             mck_test_list.append(mck_score(tgt[te_s],  pred[te_s]))
             if mck_test_list[-1] <= threshold:
@@ -157,7 +162,9 @@ def _evaluate_noise_avg(theta_list: list, params: dict,
 
 def phase2_evaluate(sgm_values, noise_seeds, rcut, data_dir, output_dir,
                     target_path, input_path,
-                    washout: int = 2000, train_num: int = 7000, k_max: int = 100):
+                    washout: int = _RC["washout"],
+                    train_num: int = _RC["train_num"],
+                    k_max: int = _RC["k_max"]):
     data_dir   = Path(data_dir)
     output_dir = Path(output_dir)
 
@@ -256,14 +263,29 @@ def parse_args():
                    default=list(range(1, 11)), metavar="NS")
     p.add_argument("--rcut", type=float, default=13)
     p.add_argument("--n-jobs", type=int, default=4)
-    p.add_argument("--data-dir",    default="data/noise_avg_sweep")
+    p.add_argument("--data-dir",    default="data")
     p.add_argument("--output-dir",  default="analysis/sgm_mean_state")
-    p.add_argument("--input-path",  default="tmp/narma10_input_0.0:0.5_seed666.dat")
-    p.add_argument("--target-path", default="tmp/narma10_target_0.0:0.5_seed666.dat")
+    p.add_argument("--narma-root",  default="narma_data",
+                   help="NARMA10 探索ルート（日付 dir を自動選択）")
+    p.add_argument("--narma-seed",  type=int, default=666,
+                   help="使用する NARMA10 の seed（default 666）")
+    p.add_argument("--input-path",  default=None,
+                   help="未指定なら最新日付 dir から自動解決")
+    p.add_argument("--target-path", default=None,
+                   help="未指定なら最新日付 dir から自動解決")
     p.add_argument("--skip-sim",    action="store_true")
     p.add_argument("--washout",     type=int, default=2000)
-    p.add_argument("--train-num",   type=int, default=7000)
-    return p.parse_args()
+    p.add_argument("--train-num",   type=int, default=_RC["train_num"])
+    args = p.parse_args()
+
+    if args.input_path is None or args.target_path is None:
+        ip, tp = find_narma_by_seed(args.narma_root, args.narma_seed)
+        args.input_path  = args.input_path  or (str(ip) if ip else None)
+        args.target_path = args.target_path or (str(tp) if tp else None)
+        if args.input_path is None or args.target_path is None:
+            p.error(f"NARMA10 (seed={args.narma_seed}) が {args.narma_root}/ に見つからない。"
+                    f"generate_narma10.py で生成してください。")
+    return args
 
 
 def main():
@@ -301,8 +323,8 @@ def main():
                     model_params.append(json.load(f))
     if model_params:
         reservoir_fixed = {
-            "readout": 1, "washout": args.washout,
-            "train_num": args.train_num, "ridge_lambda": 1e-11, "k_max": 100,
+            "readout": _RC["readout"], "washout": args.washout,
+            "train_num": args.train_num, "ridge_lambda": _RC["ridge_lambda"], "k_max": _RC["k_max"],
         }
         reservoir_swept = {"S": list(range(1, s_max + 1))}
         write_params_used(output_dir, model_params, reservoir_fixed, reservoir_swept)

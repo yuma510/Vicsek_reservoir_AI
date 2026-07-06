@@ -136,6 +136,7 @@ static void compute_interactions(double rcut, particle_t *particle, double *ft,
                     count[i]   += 1.0;
                     count[j]   += 1.0;
                     A[i * N + j] = 1;
+                    A[j * N + i] = 1;
                 }
             }
 
@@ -143,6 +144,7 @@ static void compute_interactions(double rcut, particle_t *particle, double *ft,
             for (int nb = 1; nb <= 4; nb++) {
                 int jcell = map[jcell0 + nb];
                 for (int j = head[jcell]; j > -1; j = list[j]) {
+                    if (j == i) continue;
                     double rxij = particle[j].x - particle[i].x;
                     double ryij = particle[j].y - particle[i].y;
                     if (rxij >  boxsize * 0.5) rxij -= boxsize;
@@ -157,6 +159,7 @@ static void compute_interactions(double rcut, particle_t *particle, double *ft,
                         count[i]   += 1.0;
                         count[j]   += 1.0;
                         A[i * N + j] = 1;
+                        A[j * N + i] = 1;
                     }
                 }
             }
@@ -216,7 +219,9 @@ static void load_input(const char *filename, double *u, int n)
 static void write_params(const char *filename, int model, int N, double boxsize,
                           long ntime, int utime, double h1, double v0, double sgm,
                           double K, double F, double c, double rcut, double rho,
-                          long seed_noise, long seed_pos, long seed_nf)
+                          long seed_noise, long seed_pos, long seed_nf,
+                          int write_adjacency,
+                          const char *input_file)
 {
     FILE *fp = fopen(filename, "w");
     if (!fp) { fprintf(stderr, "Error opening %s\n", filename); return; }
@@ -237,10 +242,34 @@ static void write_params(const char *filename, int model, int N, double boxsize,
         "  \"rho\": %.6f,\n"
         "  \"seed_noise\": %ld,\n"
         "  \"seed_pos\": %ld,\n"
-        "  \"seed_nf\": %ld\n"
+        "  \"seed_nf\": %ld,\n"
+        "  \"write_adjacency\": %d,\n"
+        "  \"input_file\": \"%s\"\n"
         "}\n",
         model, N, boxsize, ntime, utime, h1, v0, sgm, K, F, c, rcut, rho,
-        seed_noise, seed_pos, seed_nf);
+        seed_noise, seed_pos, seed_nf, write_adjacency, input_file);
+    fclose(fp);
+}
+
+static void write_adjacency_mat(const char *adj_dir, int frame, int N, const int *A)
+{
+    char path[768];
+    snprintf(path, sizeof(path), "%s/adjacency_%06d.dat", adj_dir, frame);
+    FILE *fp = fopen(path, "w");
+    if (!fp) { fprintf(stderr, "Error opening %s\n", path); return; }
+    /* Build each row as a char buffer and write in one call (faster than per-char fprintf). */
+    char *row = malloc((size_t)(2 * N + 2));
+    if (!row) { fclose(fp); return; }
+    for (int i = 0; i < N; i++) {
+        int pos = 0;
+        for (int j = 0; j < N; j++) {
+            row[pos++] = '0' + (char)A[i * N + j];
+            if (j < N - 1) row[pos++] = ' ';
+        }
+        row[pos++] = '\n';
+        fwrite(row, 1, (size_t)pos, fp);
+    }
+    free(row);
     fclose(fp);
 }
 
@@ -278,6 +307,7 @@ typedef struct {
     long   ntime;
     double boxsize, rho, v0, K, F, c, h1, rcut, sgm;
     long   seed_noise, seed_pos, seed_nf;  /* -1 = 未指定（デフォルト使用） */
+    int    write_adjacency;               /* 0=off, 1=on */
 } cfg_t;
 
 static cfg_t make_default_cfg(void)
@@ -298,9 +328,10 @@ static cfg_t make_default_cfg(void)
     cfg.h1         = 0.01;
     cfg.rcut       = 1.0;
     cfg.sgm        = 0.0;
-    cfg.seed_noise = -1;
-    cfg.seed_pos   = -1;
-    cfg.seed_nf    = -1;
+    cfg.seed_noise      = -1;
+    cfg.seed_pos        = -1;
+    cfg.seed_nf         = -1;
+    cfg.write_adjacency = 0;
     return cfg;
 }
 
@@ -329,7 +360,8 @@ static void parse_config(const char *path, cfg_t *cfg)
         if (sscanf(line, " \"sgm\": %lf",        &dv) == 1) cfg->sgm        = dv;
         if (sscanf(line, " \"seed_noise\": %ld", &lv) == 1) cfg->seed_noise = lv;
         if (sscanf(line, " \"seed_pos\": %ld",   &lv) == 1) cfg->seed_pos   = lv;
-        if (sscanf(line, " \"seed_nf\": %ld",    &lv) == 1) cfg->seed_nf    = lv;
+        if (sscanf(line, " \"seed_nf\": %ld",          &lv) == 1) cfg->seed_nf         = lv;
+        if (sscanf(line, " \"write_adjacency\": %d",  &iv) == 1) cfg->write_adjacency = iv;
     }
     fclose(fp);
 }
@@ -385,7 +417,14 @@ int main(int argc, char *argv[])
 
     write_params(params_file, model, cfg.N, cfg.boxsize, (long)ntime, cfg.utime,
                  cfg.h1, cfg.v0, cfg.sgm, cfg.K, cfg.F, cfg.c, cfg.rcut, cfg.rho,
-                 seed_array[2], seed_array[3], seed_array[6]);
+                 seed_array[2], seed_array[3], seed_array[6], cfg.write_adjacency,
+                 cfg.input_file);
+
+    char adj_dir[768];
+    if (cfg.write_adjacency) {
+        snprintf(adj_dir, sizeof(adj_dir), "%s/adjacency", dirname);
+        ensure_directory(adj_dir);
+    }
 
     FILE *fp1 = fopen(pos_file, "w");
     if (!fp1) { fprintf(stderr, "Error opening %s\n", pos_file); exit(1); }
@@ -438,6 +477,8 @@ int main(int argc, char *argv[])
                         particle[m].x, particle[m].y, particle[m].theta);
             }
         }
+        if ((countloop + 1) % cfg.utime == 0 && cfg.write_adjacency)
+            write_adjacency_mat(adj_dir, (countloop + 1) / cfg.utime - 1, cfg.N, A);
         countloop++;
         if ((countloop % cfg.utime == 0) && fflush(fp1) != 0) {
             fprintf(stderr, "fflush failed (disk full?): rcut=%g sgm=%g loop=%d\n",

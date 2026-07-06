@@ -17,14 +17,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from vicsek_rc import evaluate_reservoir, find_exp_dir, write_params_used
+from vicsek_rc import (evaluate_reservoir, find_exp_dir, write_params_used, load_reservoir_defaults,
+                       find_narma_by_seed)
 
 BINARY = str(ROOT / "vicsek_dynamic")
 
-# evaluate_reservoir のデフォルト（readout=sin, ridge_lambda=1e-11）に対応
+_RC = load_reservoir_defaults()
 RESERVOIR_DEFAULTS = {
-    "readout": 1, "washout": 2000, "train_num": 7000,
-    "ridge_lambda": 1e-11, "k_max": 100,
+    "readout":      _RC["readout"],
+    "washout":      _RC["washout"],
+    "train_num":    _RC["train_num"],
+    "ridge_lambda": _RC["ridge_lambda"],
+    "k_max":        _RC["k_max"],
 }
 
 
@@ -59,11 +63,12 @@ def _run_one_sim(args):
         "seed_noise":  seed + 2,
         "seed_pos":    seed + 3,
         "seed_nf":     seed + 6,
+        "ntime":       140000,
     }
     fd, cfg_path = tempfile.mkstemp(suffix=".json")
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(cfg, f)
+            json.dump(cfg, f, indent=2)
         result = subprocess.run([BINARY, cfg_path], capture_output=True, text=True)
     finally:
         os.unlink(cfg_path)
@@ -203,19 +208,30 @@ def parse_args():
                    metavar="SD", help="noise seeds (seed_array[2])")
     p.add_argument("--n-jobs", type=int, default=4,
                    help="parallel simulation workers")
-    p.add_argument("--data-dir", default="data/sgm_sweep",
+    p.add_argument("--data-dir", default="data",
                    help="directory for simulation output")
     p.add_argument("--output-dir", default="analysis/sgm_sweep",
                    help="directory for evaluation results and plots")
-    p.add_argument("--input-path",
-                   default="tmp/narma10_input_0:0.5_seed666.dat",
-                   help="NARMA10 input signal")
-    p.add_argument("--target-path",
-                   default="tmp/narma10_target_0:0.5_seed666.dat",
-                   help="NARMA10 target signal")
+    p.add_argument("--narma-root", default="narma_data",
+                   help="NARMA10 探索ルート（日付 dir を自動選択）")
+    p.add_argument("--narma-seed", type=int, default=666,
+                   help="使用する NARMA10 の seed（default 666）")
+    p.add_argument("--input-path", default=None,
+                   help="NARMA10 input signal（未指定なら最新日付 dir から自動解決）")
+    p.add_argument("--target-path", default=None,
+                   help="NARMA10 target signal（未指定なら最新日付 dir から自動解決）")
     p.add_argument("--skip-sim", action="store_true",
                    help="skip simulation, only evaluate existing data")
-    return p.parse_args()
+    args = p.parse_args()
+
+    if args.input_path is None or args.target_path is None:
+        ip, tp = find_narma_by_seed(args.narma_root, args.narma_seed)
+        args.input_path  = args.input_path  or (str(ip) if ip else None)
+        args.target_path = args.target_path or (str(tp) if tp else None)
+        if args.input_path is None or args.target_path is None:
+            p.error(f"NARMA10 (seed={args.narma_seed}) が {args.narma_root}/ に見つからない。"
+                    f"generate_narma10.py で生成してください。")
+    return args
 
 
 def main():

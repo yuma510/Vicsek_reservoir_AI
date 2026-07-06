@@ -14,29 +14,50 @@
    - seed_array[3]（初期位置）= デフォルト 13（argv[7] は使わない）
    - seed_array[6]（自然振動数）= デフォルト 16（argv[7] は使わない）
    - seed_array[2]（ノイズ）= 1, 2, ..., S_max（argv[3] を変化）
-2. NARMA10 ファイルが `tmp/narma10_{input|target}_0.0:0.5_seed666.dat` に存在すること
+2. NARMA10 ファイルが `narma_data/<YYYYMMDD_HHMMSS>/narma10_{input|target}_0.0:0.5_seed666.dat` に存在すること
+   （`--input-path`/`--target-path` 省略時は最新日付 dir を自動解決）
 
 ## データ・スクリプト
 
 - **データ**: `data/noise_avg_sweep/`（新規作成。各 sgm × S_max noise seed のシミュレーション）
 - **スクリプト**: `analysis/sgm_mean_state/sgm_mean_state.py`
 - **新関数**: `build_noise_averaged_states` in `vicsek_rc/evaluate.py`（実装済み）
-- **NARMA10**: `tmp/narma10_{input|target}_0.0:0.5_seed666.dat`
+- **NARMA10**: `narma_data/<YYYYMMDD_HHMMSS>/narma10_{input|target}_0.0:0.5_seed666.dat`（最新日付 dir を自動解決）
 
 > **注意**: `data/sgm_sweep/`（task_05）は位置・振動数・ノイズ seed がすべて変わるため流用不可。
+
+## 平均化の設定
+
+| 項目 | 値 |
+|---|---|
+| 平均をとる数（S_max） | **30** |
+| noise seed の値 | 1〜12, 14〜15, 17〜32（計 30 個） |
+| 固定する seed | seed_pos=13（初期位置）、seed_nf=16（自然振動数） |
+| 評価する S の値 | S=1, 2, ..., 30（1 刻み） |
+
+> **注意**: seed_pos=13・seed_nf=16 と同じ値を noise seed に使うと乱数系列が重複するため、13 と 16 を除外している。
+
+S=1 のとき通常リザバーと同等。S を 30 まで増やしてノイズ平均化の効果を確認する。
 
 ## 実行コマンド
 
 ```bash
+# Step 1: 新規 seeds（11〜12, 14〜15, 17〜32）のシミュレーション
+# （既存の seeds 1〜10 は data/noise_avg_sweep/ にあるためスキップ）
 python analysis/sgm_mean_state/sgm_mean_state.py \
-  --sgm-values 0.0 0.1 0.2 0.3 0.4 0.5 \
-  --noise-seeds 1 2 3 4 5 6 7 8 9 10 \
-  --rcut 13 \
-  --n-jobs 4 \
+  --noise-seeds 11 12 14 15 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 \
+  --rcut 13 --n-jobs 4 \
   --data-dir data/noise_avg_sweep \
-  --output-dir analysis/sgm_mean_state \
-  --input-path  tmp/narma10_input_0.0:0.5_seed666.dat \
-  --target-path tmp/narma10_target_0.0:0.5_seed666.dat
+  --input-path  narma_data/narma10_input_0.0:0.5_seed666.dat \
+  --target-path narma_data/narma10_target_0.0:0.5_seed666.dat
+
+# Step 2: 全 30 seeds で評価（シミュレーションはスキップ）
+python analysis/sgm_mean_state/sgm_mean_state.py \
+  --noise-seeds 1 2 3 4 5 6 7 8 9 10 11 12 14 15 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 \
+  --rcut 13 --skip-sim \
+  --data-dir data/noise_avg_sweep \
+  --input-path  narma_data/narma10_input_0.0:0.5_seed666.dat \
+  --target-path narma_data/narma10_target_0.0:0.5_seed666.dat
 ```
 
 `--skip-sim` を付けると既存の `data/noise_avg_sweep/` を使って評価のみ実行。
@@ -76,10 +97,36 @@ analysis/sgm_mean_state/<YYYYMMDD_HHMMSS>/
     results_sgm={sgm:.2f}.json     # sgm ごとのキャッシュ（再実行時スキップ）
 ```
 
+## 実行コマンド（最終）
+
+ntime=140000, train_num=6000 サンプル, λ=1e-9 で実行。シム+評価を一括実行:
+
+```bash
+python analysis/sgm_mean_state/sgm_mean_state.py \
+  --noise-seeds 1 2 3 4 5 6 7 8 9 10 11 12 14 15 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 \
+  --rcut 13 --n-jobs 4 \
+  --data-dir data/noise_avg_sweep_v2 \
+  --input-path  narma_data/narma10_input_0.0:0.5_seed666.dat \
+  --target-path narma_data/narma10_target_0.0:0.5_seed666.dat
+```
+
 ## 結果
 
-（実行後に数値と所感を記入）
+出力: `analysis/sgm_mean_state/20260620_135259/`、データ: `data/noise_avg_sweep_v2/`
+
+S=1（通常リザバー）と S=30（ノイズ平均 30 回）での MC_test 比較:
+
+| sgm | S=1 MC_test | S=30 MC_test | 改善量 |
+|---|---|---|---|
+| 0.0 | 8.408 | 8.408 | +0.000 |
+| 0.1 | 1.981 | 3.717 | +1.736 |
+| 0.2 | 1.616 | 3.443 | +1.827 |
+| 0.3 | 1.388 | 2.958 | +1.569 |
+| 0.4 | 1.210 | 2.635 | +1.425 |
+| 0.5 | 1.128 | 2.442 | +1.313 |
 
 ## 考察
-
-（実行後に記入）
+- sgm=0 ではノイズ平均化による改善なし（ノイズがないので当然）
+- sgm ≥ 0.1 では S を増やすほど MC_test が向上（S=30 で S=1 の約 2 倍）
+- ノイズ平均化は MC 回復に有効だが、sgm=0（ノイズなし）の MC=8.4 には到達しない
+- sgm=0.2 で改善量最大（+1.83）

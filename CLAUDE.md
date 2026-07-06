@@ -3,7 +3,8 @@
 このファイルは Claude Code が自動で読み込むルール集です。作業開始前に必ず参照してください。
 
 ---
-## 0. 編集範囲の制限（最重要）
+
+## 1. 編集範囲の制限
 
 **このファイル（CLAUDE.md）があるディレクトリより上位の
 ファイル・ディレクトリを編集・作成・削除してはならない。**
@@ -14,7 +15,27 @@
 
 ---
 
-## 1. ドキュメント参照ルール
+## 2. データ保護ルール
+
+**解析に使用したデータ（`position.dat`、`params_model.json`、評価結果 JSON 等）を削除してはならない。**
+
+`data/`・`analysis/<解析名>/` 配下は、そこから生成された解析結果が存在する限り削除禁止。
+削除してよいのは不完全な dir（行数不足）のみ。`position.dat` を消す場合は、そこから生成された
+評価結果 JSON がすべて保存済みであることを確認してから行う。詳細は下表。
+
+### 削除可否一覧
+
+| データ | 削除 | 条件 |
+|---|---|---|
+| 不完全な `position.dat`（行数不足） | **可** | 使用済みでないことを確認 |
+| 完全な `position.dat` | **禁止** | 評価結果 JSON が保存済みであれば可（要確認） |
+| `params_model.json` | **禁止** | 常に保持 |
+| `analysis/<解析名>/<dir>/` | **禁止** | サマリー・プロットは研究記録 |
+| テスト用一時 dir（`data/test*/` 等） | **可** | 本番実験でないことを確認 |
+
+---
+
+## 3. ドキュメント参照ルール
 
 作業開始前に必ず以下を読むこと:
 
@@ -29,71 +50,40 @@
 **コード変更後は `code_reference.md` の該当箇所を必ず更新すること。**
 仕様変更を検出した場合は実験を継続する前にその内容を要約すること。
 
+**結果に影響する変更を行った場合は `analysis/tasks/task_0N_*.md` の該当タスクを必ず更新すること。**
+
+対象となる変更の例:
+- 解析パラメータ（λ、train_num、washout、k_max 等）の変更
+- 評価手法・指標の変更（MC 計算の閾値、NRMSE の定義等）
+- スイープ範囲・seed 数の変更
+- バグ修正で結果が変わった場合
+
+更新すべき内容:
+- 変更した設定値と変更前の値
+- 変更後の結果（NRMSE_test、MC_test、gap 等）
+- 変更の理由・考察
+
 ---
 
-## 2. データディレクトリ規則
+## 4. データディレクトリ規則
 
----
+実験データは用途別に 2 つのディレクトリへ格納する: `data/`（シミュレーション軌道）、
+`analysis/<解析名>/`（解析スクリプトと出力）。
+各ディレクトリの規則を以下に定める。README 更新義務は §4.3 に共通ルールとしてまとめる。
 
-## 2a. data/ ディレクトリ規則
-
-### 個別シミュレーションディレクトリ
+### 4.1 data/ ディレクトリ
 
 - ディレクトリ名は **タイムスタンプのみ**: `data/<YYYYMMDD_HHMMSS>/`
 - 各ディレクトリに以下の 2 ファイルが生成される:
   - `position.dat` — シミュレーション軌道（N×(ntime/utime) 行、utime ステップごとに 1 フレーム保存）
   - `params_model.json` — パラメータ（機械可読）
-- **ディレクトリの検索はディレクトリ名のパターンでなく `params_model.json` の内容で行う**
-  （glob パターンは使わない）
+- **グループディレクトリは作成しない**。全シム dir を `data/` 直下に並べる
+- **実験の検索は `params_model.json` の内容で行う**（`find_exp_dir()` を使用）
+  - 例: `find_exp_dir("data", rcut=5, seed=10, seed_key="seed_pos")`
+  - ディレクトリ名のパターンマッチは使わない
+- 同じ実験セットを複数のタスクが参照してよい（`data/` は共有の軌道倉庫）
 
-### グループディレクトリ（実験シリーズ）
-
-複数のシミュレーションをまとめる場合は、親ディレクトリを作りその中に個別 sim dir を並べる:
-
-```
-data/<YYYYMMDD_HHMMSS>_<シリーズ名>/   ← グループ dir（手動命名）
-    <YYYYMMDD_HHMMSS>/                 ← 個別 sim dir（自動生成）
-    <YYYYMMDD_HHMMSS>/
-    ...
-```
-
-- グループ dir 名: `<タイムスタンプ>_<シリーズを端的に表す語>`（例: `20260524_090700_seed2_change`）
-- グループ実験の目的・変化パラメータ・固定パラメータは **`data/README.md`** にまとめる
-
-### README 更新ルール
-
-**シミュレーションを実行したら必ず `data/README.md` を更新すること。**
-
-- 個別実験（単発 rcut / sgm 変更など）→「個別実験一覧」テーブルに 1 行追加
-- グループ実験（for ループなど）→「グループ実験一覧」テーブルに追加し、詳細セクションも作成
-
----
-
-## 2b. reservoir_data/ ディレクトリ規則
-
-`vicsek_prediction.py` が生成するリザバー評価結果の格納場所。
-
-- ディレクトリ名: `reservoir_data/<YYYYMMDD_HHMMSS>/`（実行ごとに自動生成）
-- 各ディレクトリに以下のファイルが生成される:
-  - `results_reservoir.json` — NRMSE・MC・パラメータの集約（`params_model`・`params_reservoir`・`results` キー）
-  - `narma10_prediction.png` — 正解と予測の重ね描き
-  - `MCk.png` — 遅延 k ごとの MC_k カーブ
-  - `NARMA10_prediction.dat` — 予測値の数値データ
-  - `MCk_prediction/k=<k>.dat` — 各遅延 k の予測値
-- `results_reservoir.json` の `data_path` フィールドに対応する `data/<dir>/` のパスが記録される（対応関係はこのフィールドで追跡）
-- グループ実験のまとめ評価は `reservoir_data/<YYYYMMDD_HHMMSS>_<シリーズ名>/` とする
-- グループ実験の目的・変化パラメータ・結果サマリーは **`reservoir_data/README.md`** にまとめる
-
-### README 更新ルール
-
-**リザバー評価を実行したら必ず `reservoir_data/README.md` を更新すること。**
-
-- 個別評価 → 「個別評価一覧」テーブルに rcut・sgm・MC・NRMSE・対応 data dir を 1 行追加
-- グループ評価 → 「グループ実験一覧」テーブルに追加し、詳細セクションも作成
-
----
-
-## 2c. analysis/<解析名>/ ディレクトリ規則
+### 4.2 analysis/<解析名>/ ディレクトリ
 
 各解析はサブディレクトリに分かれており、**スクリプトと出力データが同じサブ dir に置かれる**。
 
@@ -112,22 +102,49 @@ analysis/<解析名>/
   スクリプトがタイムスタンプサブ dir を自動生成する
 - 詳細は `analysis/README.md` を参照
 
-### README 更新ルール
+### 4.3 README 更新ルール（共通）
 
-**新しい解析を実施したら必ず `analysis/README.md` を更新すること。**
+**ディレクトリにデータを生成したら、対応する README を必ず更新すること。**
 
-- 新しい解析サブ dir を作成したとき → `analysis/README.md` のサブディレクトリ一覧テーブルに追加
-- 既存解析を実行して新しい知見が得られたとき → 該当解析の概要欄に結果メモを追記
+| 操作 | 更新する README | 追加内容 |
+|---|---|---|
+| `data/` にシムを追加（スイープ等） | `data/README.md`「実験一覧」 | 1 行追加（固定パラメータ・掃引パラメータ・シム数） |
+| `analysis/` 新規サブ dir を作成 | `analysis/README.md` サブディレクトリ一覧テーブル | 1 行追加 |
+| `analysis/` 既存解析を実行し新知見 | `analysis/README.md` 該当解析の概要欄 | 結果メモを追記 |
 
 ---
 
-## 3. メタデータの管理
-- メタデータから同じデータを再現できるように出力するメタデータを設定する
-- **パラメータ・メタデータ**は出力データと一緒に **JSON** ファイルで出力する
-  （`params_model.json` / `params_used.json` / `results_reservoir.json` 等）
-- 解析のため、vicsek_dynamic.cやvicsek_prediction.pyで新しいデータを出力するときはメタデータを保持するjsonに新たに出力したデータに関するkeyを追加する
+## 5. パラメータ・メタデータの管理
 
-### プロット元データの保存（CSV）
+### 5.1 入力パラメータはハードコード禁止
+
+**スクリプト内にパラメータ値を直接書いてはならない。すべて JSON ファイルから読み込むこと。**
+
+| パラメータ種別 | JSON ファイル | 読み込み方法 |
+|---|---|---|
+| モデルパラメータ（N, rcut, sgm, ntime 等） | `configs/default_params.json` | vicsek_dynamic.c が読む |
+| 共通リザバーパラメータ（washout, train_num, ridge_lambda 等） | `configs/default_reservoir_params.json` | `load_reservoir_defaults()` |
+| 解析固有パラメータ（各解析スクリプトにしかない設定） | `analysis/<解析名>/default_params.json` | スクリプトが直接読む |
+
+**argparse のデフォルト値は JSON から取得すること:**
+
+```python
+# ✓ 正しい — 共通パラメータ
+_RC = load_reservoir_defaults()
+p.add_argument("--washout", type=int, default=_RC["washout"])
+
+# ✓ 正しい — 解析固有パラメータ
+_CA = json.loads((Path(__file__).parent / "default_params.json").read_text())
+p.add_argument("--frame-end", type=int, default=_CA["frame_end"])
+
+# ✗ 禁止
+p.add_argument("--washout",   type=int, default=2000)   # JSON にある値をコピー
+p.add_argument("--frame-end", type=int, default=2500)   # 解析固有でも直書き禁止
+```
+
+使用したデフォルト値は `params_used.json` に必ず記録すること（記録方法は §5.3）。
+
+### 5.2 プロット元データの保存（CSV）
 
 - **プロットの元データ（数値系列・散布点）は CSV（long 形式）で保存する**。サマリーを JSON で保存しない
   （`*_summary.json` は廃止し `*_data.csv` 等に置き換え済み）。
@@ -139,7 +156,7 @@ analysis/<解析名>/
 - パラメータ・結果メタデータ（`params_used.json` / `params_model.json` / `results_reservoir.json`）は
   **JSON のまま**で CSV 化しない。
 
-### 解析プロットのパラメータ記録（`params_used.json`）
+### 5.3 解析プロットのパラメータ記録（`params_used.json`）
 
 - 解析（プロット）を出力するときは、使用した**モデルパラメータ（vicsek_dynamic.c 由来）**と
   **レザバー計算パラメータ**を、各出力ディレクトリ（`analysis/<解析名>/<YYYYMMDD_HHMMSS>/`）に
@@ -153,74 +170,23 @@ analysis/<解析名>/
   ```json
   {
     "model":     { "fixed": { ...スカラ... }, "swept": { "rcut": [...], "seed": [...] } },
-    "reservoir": { "fixed": { "readout":1, "washout":2000, "train_num":7000,
-                              "ridge_lambda":1e-11, "k_max":100 }, "swept": {} }
+    "reservoir": { "fixed": { "readout":1, "washout":2000, "train_num":6000,
+                              "ridge_lambda":1e-9, "k_max":100 }, "swept": {} }
   }
   ```
 
-
-## 4. データ保護ルール（最重要）
-
-**解析に使用したデータ（`position.dat`、`params_model.json`、評価結果 JSON 等）を削除してはならない。**
-
-- `data/` 配下のシミュレーションディレクトリは、そこから生成された解析結果が存在する限り削除禁止
-- `reservoir_data/`、`analysis/<解析名>/` 配下の評価結果も同様に削除禁止
-- ディスク節約のために `position.dat` を削除する場合は、**その `position.dat` から生成された評価結果（result JSON）がすべて保存済みであることを確認してから**行うこと
-- 不完全なシミュレーションディレクトリ（行数不足）のみ削除可能（使用済みデータではないため）
-
-### 削除可否一覧
-
-| データ | 削除 | 条件 |
-|---|---|---|
-| 不完全な `position.dat`（行数不足） | **可** | 使用済みでないことを確認 |
-| 完全な `position.dat` | **禁止** | 評価結果 JSON が保存済みであれば可（要確認） |
-| `params_model.json` | **禁止** | 常に保持 |
-| `reservoir_data/<dir>/` | **禁止** | 解析に使用済みの評価結果 |
-| `analysis/<解析名>/<dir>/` | **禁止** | サマリー・プロットは研究記録 |
-| テスト用一時 dir（`data/test*/` 等） | **可** | 本番実験でないことを確認 |
-
 ---
 
-## 5. ディスク容量管理（データ保護と両立させること）
+## 6. ディスク容量管理（データ保護と両立させること）
 
 - D:\\ ドライブは 3.7TB だが実験データで逼迫しやすい
 - シミュレーション実行前に空き容量を確認する: `df -h /mnt/d/`
 - 各シミュレーションは約 **230MB** の `position.dat` を生成する（utime ごとサンプリング後）
-- 不完全なディレクトリ（行数不足）は速やかに削除してスペースを確保する
+- 空き容量確保のための削除は §2 の削除可否ルールに従う（不完全な dir のみ削除可）
 - 大量のシミュレーションをバックグラウンド実行する場合は、進捗を監視しディスクフルになる前に止めること
 
 ---
-## 7. 実験実行フロー
 
-1 つの完全な実験サイクルは以下の順序で実行する。
+## 7. git の管理
 
-### Step 1: NARMA10 入力生成（`tmp/` が空の場合のみ）
-
-```bash
-python generate_narma10.py
-# → tmp/narma10_{input|target}_0.0:0.5_seed666.dat を生成
-```
-
-### Step 2: C コードのコンパイル（`vicsek_dynamic.c` を変更した場合のみ）
-
-```bash
-cc -O2 -Wall -Wextra -o vicsek_dynamic vicsek_dynamic.c -lm
-```
-
-### Step 3: シミュレーション実行
-
-```bash
-./vicsek_dynamic [input_file] [output_base] [seed_noise] [rcut] [sgm] [seed_nf]
-# → data/<YYYYMMDD_HHMMSS>/{position.dat, params_model.json} を生成
-```
-
-### Step 4: リザバー評価
-
-```bash
-python vicsek_prediction.py --data-folder data --date-folder <dir> \
-  --input-path tmp/narma10_input_0.0:0.5_seed666.dat \
-  --target-path tmp/narma10_target_0.0:0.5_seed666.dat
-# → reservoir_data/<YYYYMMDD_HHMMSS>/{results_reservoir.json, ...} を生成
-```
-
-Step 1〜4 をまとめて実行する場合は `for.sh` を参照。
+- コードの変更を行ったときは GitHub に push を行う

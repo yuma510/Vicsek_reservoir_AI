@@ -16,7 +16,8 @@
 ## 前提条件
 
 1. `vicsek_dynamic` がコンパイル済みであること（`cc -O2 -Wall -Wextra -o vicsek_dynamic vicsek_dynamic.c -lm`）
-2. NARMA10 ファイルが存在すること（`python generate_narma10.py` で生成、`tmp/narma10_{input|target}_0.0:0.5_seed666.dat`）
+2. NARMA10 ファイルが存在すること（`python generate_narma10.py` で生成、`narma_data/<YYYYMMDD_HHMMSS>/narma10_{input|target}_0.0:0.5_seed666.dat`）。
+   `--input-path`/`--target-path` は省略可（`narma_data/` 以下の最新日付 dir を自動解決。下記コマンドの明示指定は任意）
 
 ## 実行コマンド
 
@@ -26,8 +27,8 @@ python analysis/sgm_sweep/run_sgm_sweep.py \
   --rcut 13 \
   --seeds 1 2 3 4 5 6 7 8 9 10 \
   --n-jobs 4 \
-  --input-path tmp/narma10_input_0.0:0.5_seed666.dat \
-  --target-path tmp/narma10_target_0.0:0.5_seed666.dat \
+  --input-path narma_data/narma10_input_0.0:0.5_seed666.dat \
+  --target-path narma_data/narma10_target_0.0:0.5_seed666.dat \
   --output-dir analysis/sgm_sweep
 ```
 
@@ -70,3 +71,26 @@ X 軸は sgm 値。各グラフに test（青 ●）と train（赤 △）を同
 
 - **sgm=0 のときのノイズ seed**: `seed_array[2]`（ノイズ）は sgm=0 では動力学に影響しない。ただし `seed_array[3]`（初期位置）と `seed_array[6]`（自然振動数）は sgm=0 でも有効なため、10 seed 間で異なる結果が得られる
 - **`--skip-sim`**: 既存の `data/sgm_sweep/` を使って評価のみ実行する場合に付ける
+
+## 結果
+
+### 第2回（ntime=140000, train_num=6000 サンプル, λ=1e-9）
+出力: `analysis/sgm_sweep/20260620_070251/`、データ: `data/sgm_sweep_v2/`
+
+**変更内容**: `evaluate_reservoir` バグ修正 + ntime=140000 への変更（等長 train/test: 各 6000 サンプル）。
+
+seed 平均±標準偏差（10 seed）:
+
+| sgm | MC_test | NRMSE_test |
+|---|---|---|
+| 0.0 | 6.856 ± 2.513 | 0.3592 ± 0.4226 |
+| 0.1 | 1.965 ± 0.038 | 0.2355 ± 0.0029 |
+| 0.2 | 1.616 ± 0.025 | 0.2497 ± 0.0025 |
+| 0.3 | 1.408 ± 0.027 | 0.2616 ± 0.0028 |
+| 0.4 | 1.242 ± 0.034 | 0.2690 ± 0.0023 |
+| 0.5 | 1.140 ± 0.019 | 0.2741 ± 0.0019 |
+
+## 考察
+- sgm=0（ノイズなし）で MC が高く（6.9）、ノイズが増えるにつれて急速に低下
+- sgm=0 の標準偏差が大きい（2.5）のは、ノイズなしでは初期位置・振動数の差異が動力学に大きく影響するため
+- sgm ≥ 0.1 では標準偏差が小さく（～0.03）再現性が高い

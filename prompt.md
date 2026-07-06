@@ -36,6 +36,7 @@
 ### 共通ルール
 - analysis/<解析名>/<YYYYMMDD_HHMMSS>にデータを入れてください
 - dataやreservoir_data内に必要なデータがなければ、vicsek_dynamic.cやvicsek_prediction.pyを実行してください。それらのデータの保存はそれぞれdata/<解析名>/<YYYYMMDD_HHMMSS>, reservoir_data/<解析名>/<YYYYMMDD_HHMMSS>にしてください
+- `analysis/tasks`にあるタスクが書かれたmdファイルには必ず手法について記述してください。
 
 ---
 

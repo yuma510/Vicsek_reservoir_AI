@@ -3,11 +3,37 @@ import numpy as np
 
 from .loaders import load_position_fast, build_states
 from .metrics import nrmse, nrmse2, mck_score
+from .params_io import load_reservoir_defaults
+
+_RC = load_reservoir_defaults()
+
+
+def ridge_gram_decomp(X_train: np.ndarray) -> tuple:
+    """Eigendecompose X_train.T @ X_train for efficient λ-sweep.
+
+    Returns (vals, vecs) from eigh. Use with ridge_solve_gram to avoid
+    recomputing the Gram matrix for each λ.
+    """
+    XtX = X_train.T @ X_train
+    vals, vecs = np.linalg.eigh(XtX)
+    return vals, vecs
+
+
+def ridge_solve_gram(X_train: np.ndarray, vals: np.ndarray, vecs: np.ndarray,
+                     y_train: np.ndarray, lam: float) -> np.ndarray:
+    """Compute output weights W using precomputed Gram eigendecomposition.
+
+    Efficient when sweeping over λ with fixed X_train.
+    Returns W (D,) where D = X_train.shape[1].
+    """
+    XtY = X_train.T @ y_train
+    VtY = vecs.T @ XtY
+    return vecs @ (VtY / (vals + lam))
 
 
 def ridge_predict(states: np.ndarray, target: np.ndarray,
                   washout: int, train_num: int,
-                  ridge_lambda: float = 1e-11) -> np.ndarray:
+                  ridge_lambda: float = _RC["ridge_lambda"]) -> np.ndarray:
     """Train ridge regression on [washout:train_num] and predict over all states."""
     train_end = min(train_num + 1, states.shape[0], target.shape[0])
     X = states[washout:train_end]
@@ -51,8 +77,9 @@ def build_noise_averaged_states(theta_list: list,
 
 def evaluate_reservoir(pos_path, params: dict,
                        target_path, input_path,
-                       washout: int = 2000, train_num: int = 7000,
-                       k_max: int = 100) -> dict:
+                       washout: int = _RC["washout"],
+                       train_num: int = _RC["train_num"],
+                       k_max: int = _RC["k_max"]) -> dict:
     """Run ridge regression on position.dat and return NRMSE / MC results."""
     print("    Loading position.dat …", flush=True)
     data = load_position_fast(pos_path)
@@ -65,10 +92,12 @@ def evaluate_reservoir(pos_path, params: dict,
 
     states   = build_states(data, N, utime, pre_subsampled=pre_subsampled)
     y_target = np.loadtxt(target_path)
-    y_pred   = ridge_predict(states, y_target, washout, train_num)
+    # train_num = number of training samples (after washout); frame index = washout + train_num
+    train_end_frame = washout + train_num
+    y_pred   = ridge_predict(states, y_target, washout, train_end_frame)
 
     eval_total = min(total_num, y_target.shape[0], y_pred.shape[0])
-    train_end  = min(train_num, eval_total)
+    train_end  = min(train_end_frame, eval_total)
 
     nr_train  = nrmse( y_target[washout:train_end],  y_pred[washout:train_end])
     nr_test   = nrmse( y_target[train_end:eval_total], y_pred[train_end:eval_total])
@@ -79,15 +108,15 @@ def evaluate_reservoir(pos_path, params: dict,
     raw_input = np.loadtxt(input_path)
     col_input = raw_input[:, 0] if raw_input.ndim > 1 else raw_input
     length    = states.shape[0]
-    threshold = N / (train_num - washout)
+    threshold = N / train_num
 
     mck_train_list, mck_test_list = [], []
     for delay in range(k_max + 1):
         padded = np.concatenate([np.zeros(delay), col_input])
         tgt    = padded[:length]
-        pred   = ridge_predict(states, tgt, washout, train_num)
-        tr_s   = slice(washout, min(train_num + 1, length))
-        te_s   = slice(min(train_num, length), min(total_num, length))
+        pred   = ridge_predict(states, tgt, washout, train_end_frame)
+        tr_s   = slice(washout, min(train_end_frame + 1, length))
+        te_s   = slice(min(train_end_frame, length), min(total_num, length))
         mck_train_list.append(mck_score(tgt[tr_s], pred[tr_s]))
         mck_test_list.append(mck_score(tgt[te_s],  pred[te_s]))
         if mck_test_list[-1] <= threshold:  # early stopping

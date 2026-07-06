@@ -26,29 +26,29 @@ bash for.sh
 
 ## 手動で実行する場合
 
-NARMA10 データを生成します。
+NARMA10 データを生成します（`narma_data/<YYYYMMDD_HHMMSS>/` 配下に出力されます）。
 
 ```bash
 python3 generate_narma10.py
 ```
 
-Vicsek シミュレーションをコンパイルして実行します。
+Vicsek シミュレーションをコンパイルして実行します。入力パスは生成された日付 dir
+配下のファイルを指定します（例）。
 
 ```bash
 cc -O2 -Wall -Wextra -o vicsek_dynamic vicsek_dynamic.c -lm
-./vicsek_dynamic tmp/narma10_input_0:0.5_seed666.dat data
+./vicsek_dynamic narma_data/<YYYYMMDD_HHMMSS>/narma10_input_0.0:0.5_seed666.dat data
 ```
 
-最新のシミュレーション結果に対してリザバー評価を実行します。
+解析スクリプトを直接実行してリザバー評価・集計を行います。
 
 ```bash
-python3 analysis/vicsek_prediction.py --data-folder data --output-folder reservoir_data
+python analysis/reservoir_aggregate/reservoir_aggregate.py \
+    --data-dir data \
+    --sgm-values 0.0 0.1 0.2 0.3 0.4 0.5 \
+    --seeds 1 2 3 4 5 6 7 8 9 10 \
+    --rcut 13.0 \
+    --out analysis/reservoir_aggregate
 ```
 
-特定のシミュレーション結果を指定してリザバー評価を実行します。
-
-```bash
-python3 analysis/vicsek_prediction.py --data-folder data --date-folder YYYYMMDD_HHMMSS
-```
-
-評価結果は `reservoir_data/YYYYMMDD_HHMMSS/` に保存されます。
+評価結果は `analysis/reservoir_aggregate/<sgm>/` に保存されます。

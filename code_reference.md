@@ -14,14 +14,14 @@
 |---|---|---|
 | リザバー（動的システム） | Vicsek モデル（N=500 粒子の結合振動子） | `vicsek_dynamic.c` |
 | リザバー状態 x(t) | 各粒子の角度 θ_m（utime=10 ステップごとのスナップショット） | `position.dat` 3列目、`build_states` in `vicsek_rc/loaders.py` |
-| 入力信号 u(t) | NARMA10 入力時系列（長さ 12000、Uniform(0, 0.5)） | `tmp/narma10_input_*.dat` |
+| 入力信号 u(t) | NARMA10 入力時系列（長さ 12000、Uniform(0, 0.5)） | `narma_data/<YYYYMMDD_HHMMSS>/narma10_input_*.dat` |
 | 入力注入 | 角度更新式の外力項 `F·sin(c·v[t] - θ_m)`（v[t] = 4·(u[t]-0.25) でスケーリング） | `vicsek_dynamic.c` 更新式 |
 | リードアウト状態 φ(x(t)) | `sin(θ_m)` の N 次元ベクトル + バイアス 1 → (N+1) 次元 | `build_states(readout=1, add_bias=True)` |
 | 出力重み W_out | Ridge 回帰係数 | `ridge_predict` in `vicsek_rc/evaluate.py` |
-| 正解信号 y(t) | NARMA10 ターゲット時系列 | `tmp/narma10_target_*.dat` |
+| 正解信号 y(t) | NARMA10 ターゲット時系列 | `narma_data/<YYYYMMDD_HHMMSS>/narma10_target_*.dat` |
 | ウォームアップ（washout） | 最初の 2000 ステップを除外 | `evaluate_reservoir` パラメータ `washout=2000` |
-| 訓練区間 | [2000, 7000) の 5000 ステップ | `train_num=7000` |
-| テスト区間 | [7000, 12000) の 5000 ステップ | 同上 |
+| 訓練区間 | [2000, 8000) の 6000 サンプル | `train_num=6000`（サンプル数。フレームインデックス = washout + train_num = 8000） |
+| テスト区間 | [8000, 14000) の 6000 サンプル | 等長分割（ntime=140000 = 14000フレーム が必要） |
 | 性能指標 | NRMSE（予測精度）・MC（記憶容量） | `vicsek_rc/metrics.py` |
 
 ### 入力注入の詳細
@@ -45,12 +45,12 @@ position.dat の theta 列
   → 状態行列 X: shape (12000, N+1) = (12000, 501)
 ```
 
-訓練は `X[washout:train_num]` と `y[washout:train_num]` で Ridge 回帰を解く。
+訓練は `X[washout:washout+train_num]` と `y[washout:washout+train_num]` で Ridge 回帰を解く（train_num はサンプル数）。
 
 ---
 
 ## コード全体で行っていること
-このコードではVicsekモデルを使用した物理レザバーを行っている。そのためにもとのVicsekモデルに入力を加えて、その状態を読み取って学習（予測）を行っている。ただし、現段階では蔵元モデルとVicsekモデルの橋渡しになるモデルを使用している。vicsek_dynamic.cでは、入力が加えられているVicsekモデルのシミュレーションを行っている。そして、時間変化する各粒子の状態をデータとして出力している。vicsek_prediction.pyでは、出力された粒子の状態の読み出し（リードアウト）の方法を定めている。そこから、読み出された状態と正解データとのリッジ回帰を行うことで予測を行っている。analysisでは、このレザバーの予測精度に影響を与える要因について調べている。
+このコードではVicsekモデルを使用した物理レザバーを行っている。そのためにもとのVicsekモデルに入力を加えて、その状態を読み取って学習（予測）を行っている。vicsek_dynamic.cでは、入力が加えられているVicsekモデルのシミュレーションを行っている。そして、時間変化する各粒子の状態をデータとして出力している。vicsek_rc/ では、出力された粒子の状態の読み出し（リードアウト）とリッジ回帰（評価）の共通関数を提供している。analysis/ では、このレザバーの予測精度に影響を与える要因について調べている。
 
 ---
 
@@ -58,30 +58,23 @@ position.dat の theta 列
 
 ```
 generate_narma10.py
-  └─→ tmp/narma10_input_<low>:<high>_seed<seed>.dat   (入力信号 u)
-  └─→ tmp/narma10_target_<low>:<high>_seed<seed>.dat  (正解信号 y)
+  └─→ narma_data/<YYYYMMDD_HHMMSS>/narma10_input_<low>:<high>_seed<seed>.dat   (入力信号 u)
+  └─→ narma_data/<YYYYMMDD_HHMMSS>/narma10_target_<low>:<high>_seed<seed>.dat  (正解信号 y)
+  └─→ narma_data/<YYYYMMDD_HHMMSS>/narma10_params_<low>:<high>_seed<seed>.json (使用パラメータ)
+  （読込側は narma_data/ 以下の最新日付 dir を自動選択: vicsek_rc.find_narma_by_seed）
 
 # 個別実行
-vicsek_dynamic.c  ←  tmp/narma10_input_*.dat
+vicsek_dynamic.c  ←  narma_data/<YYYYMMDD_HHMMSS>/narma10_input_*.dat
   └─→ data/<YYYYMMDD_HHMMSS>/position.dat
   └─→ data/<YYYYMMDD_HHMMSS>/params_model.json
+  └─→ data/<YYYYMMDD_HHMMSS>/adjacency/adjacency_<frame>.dat   (write_adjacency=1 のとき)
 
-vicsek_prediction.py  ←  data/<YYYYMMDD_HHMMSS>/position.dat
-  └─→ reservoir_data/<YYYYMMDD_HHMMSS>/results_reservoir.json
-  └─→ reservoir_data/<YYYYMMDD_HHMMSS>/narma10_prediction.png
-  └─→ reservoir_data/<YYYYMMDD_HHMMSS>/MCk.png
-  └─→ reservoir_data/<YYYYMMDD_HHMMSS>/NARMA10_prediction.dat
-  └─→ reservoir_data/<YYYYMMDD_HHMMSS>/MCk_prediction/k=<k>.dat
-
-# グループ実行（for.sh やスイープスクリプトによる複数シミュレーション）
-vicsek_dynamic.c (×N)  ←  tmp/narma10_input_*.dat
-  └─→ data/<YYYYMMDD_HHMMSS>_<series>/<YYYYMMDD_HHMMSS>/{position.dat, params_model.json}
-
-vicsek_prediction.py (×N)  ←  data/<series>/<YYYYMMDD_HHMMSS>/position.dat
-  └─→ reservoir_data/<YYYYMMDD_HHMMSS>_<series>/<YYYYMMDD_HHMMSS>/results_reservoir.json
+# グループ実行（スイープスクリプトによる複数シミュレーション）
+vicsek_dynamic.c (×N)  ←  narma_data/<YYYYMMDD_HHMMSS>/narma10_input_*.dat
+  └─→ data/<YYYYMMDD_HHMMSS>/{position.dat, params_model.json}
 
 # 解析
-analysis/<解析名>/<script>.py  ←  data/ または reservoir_data/
+analysis/<解析名>/<script>.py  ←  data/
   └─→ analysis/<解析名>/<YYYYMMDD_HHMMSS>/*_data.csv      (プロット元データ、long 形式)
   └─→ analysis/<解析名>/<YYYYMMDD_HHMMSS>/*.png
   └─→ analysis/<解析名>/<YYYYMMDD_HHMMSS>/params_used.json (使用パラメータ、JSON)
@@ -114,7 +107,23 @@ u(t) ~ Uniform(low, high)
 | `--low` / `--high` | 0.0 / 0.5 | 入力の範囲 |
 | `--output-dir` | `tmp` | 出力先 |
 
-出力ファイル名: `narma10_{input|target}_<low>:<high>_seed<seed>.dat`
+**出力先：** `--output-dir`（default `narma_data`）配下に日付 dir
+`narma_data/<YYYYMMDD_HHMMSS>/` を自動生成する（`vicsek_rc.new_narma_dir`）。
+**1 日付 dir = 1 データセット**（下記 3 ファイル）で、
+同一秒に複数生成する場合は `_1`, `_2`, … を付与して衝突を避ける。
+
+| ファイル | 内容 |
+|---|---|
+| `narma10_input_<low>:<high>_seed<seed>.dat` | 入力信号 u |
+| `narma10_target_<low>:<high>_seed<seed>.dat` | 正解信号 y |
+| `narma10_params_<low>:<high>_seed<seed>.json` | 使用パラメータ（`length` / `seed` / `low` / `high` / `input_file` / `target_file`）。再現用メタデータ（CLAUDE.md §5、`vicsek_rc.save_narma_params`） |
+
+読込側（sgm・rcut・ridge・correlation・reservoir_aggregate 等の解析スクリプト）は
+`--input-path`/`--target-path` 未指定時に `vicsek_rc.find_narma_by_seed` で
+`narma_data/` 以下の**最新日付 dir**（無ければ直下）を seed で自動解決する。
+`--narma-root` / `--narma-seed`（default 666）で変更可能。
+生成側（`ensure_narma10`）は既存日付 dir を再利用し、無い seed だけ**その seed 専用の
+新しい日付 dir**に生成する（1 dir = 1 データセット）。
 
 ---
 
@@ -157,6 +166,7 @@ y_m  += h1 · v0 · sin(θ_m)
 | `utime` | 10 | 入力1点あたりのステップ数 |
 | `ntime` | 120000 | 総ステップ数（= 12000 × utime） |
 | `rcut` | 1.0 | 相互作用カットオフ（単一値、CLI で指定） |
+| `write_adjacency` | 0 | 隣接行列を `adjacency/` に出力するか（0=off, 1=on） |
 
 ### RNG 設計
 
@@ -190,7 +200,7 @@ JSON フォーマット（`configs/default_params.json` 参照 / `params_model.j
 
 ```json
 {
-  "input_file":  "tmp/narma10_input_0.0:0.5_seed666.dat",
+  "input_file":  "narma_data/<YYYYMMDD_HHMMSS>/narma10_input_0.0:0.5_seed666.dat",
   "output_base": "data",
   "N": 500,
   "boxsize": 15.8,
@@ -206,7 +216,26 @@ JSON フォーマット（`configs/default_params.json` 参照 / `params_model.j
   "rho": 2.0,
   "seed_noise": 12,
   "seed_pos": 13,
-  "seed_nf": 16
+  "seed_nf": 16,
+  "write_adjacency": 0
+}
+```
+
+`params_model.json`（出力フォーマット。`input_file` と `write_adjacency` が追加される）:
+
+```json
+{
+  "model": 1,
+  "N": 500,
+  "boxsize": 15.800000,
+  "ntime": 120000,
+  "utime": 10,
+  ...
+  "seed_noise": 12,
+  "seed_pos": 13,
+  "seed_nf": 16,
+  "write_adjacency": 0,
+  "input_file": "narma_data/<YYYYMMDD_HHMMSS>/narma10_input_0.0:0.5_seed10_n24000.dat"
 }
 ```
 
@@ -216,54 +245,11 @@ JSON フォーマット（`configs/default_params.json` 参照 / `params_model.j
 
 **`position.dat`** — `x y theta` の3列テキスト。utime ステップごとに 1 フレーム（各入力期間の末尾ステップ）を N 行出力。合計 N×(ntime/utime) 行（デフォルト: N×12000 = 6,000,000 行）。
 
-**`params_model.json`** — 上記パラメータ + seed をすべて記録。
+**`params_model.json`** — 上記パラメータ + seed + `write_adjacency` + `input_file`（使用した NARMA 入力ファイルのパス）をすべて記録。`input_file` により position.dat の再現に必要な入力シーケンスが自明になる。
+
+**`adjacency/adjacency_<frame>.dat`** — `write_adjacency=1` のときのみ生成。N×N の 0/1 行列（スペース区切り、対称行列）。`frame` は 0 始まりの utime フレームインデックス（6 桁ゼロ埋め）。1 ファイルあたり約 500 KB（N=500 時）。
 
 リザバー状態として使われるのは3列目の `theta`（粒子の向き）。
-
----
-
-## vicsek_prediction.py
-
-### 状態ベクトルの構築
-
-1. `position.dat` の列 2（theta）を取得
-2. `(frame_count, N)` に reshape（frame_count = ntime/utime = 12000）
-3. 新フォーマットは既に utime ごとのフレームのみ含むため全行を使用 → 形状 (12000, N)
-4. `readout=1`（デフォルト）なら `sin(theta)` を適用
-5. バイアス列（全1）を先頭に追加 → **(12000, N+1)**
-
-### 学習
-
-```
-Wout = (X^T X + λI)^{-1} X^T Y
-```
-
-| 引数 | デフォルト | 意味 |
-|---|---|---|
-| `washout` | 2000 | 過渡応答除外期間 |
-| `train_num` | 7000 | 訓練終端インデックス |
-| `ridge_lambda` | 1e-11 | 正則化係数 |
-
-### 評価指標
-
-```
-NRMSE  = sqrt( MSE / mean(y_true²) )
-NRMSE2 = MSE / Var(y_true)
-MC_k   = corr(u(t-k), ŷ_k(t))²   （二乗Pearson相関）
-MC     = Σ MC_k   （MC_k < N/(train_num - washout) で打ち切り）
-```
-
-### 出力ファイル（`reservoir_data/<timestamp>/`）
-
-| ファイル | 内容 |
-|---|---|
-| `results_reservoir.json` | params、NRMSE/NRMSE2/MC（train/test）の集約（メタデータ、JSON） |
-| `narma10_prediction.png` | 正解・予測の重ね描き（赤破線で train/test 境界） |
-| `narma10_prediction.csv` | プロット元データ（`timestep, target, prediction`） |
-| `NARMA10_prediction.dat` | 予測値の数値データ（他ツール用） |
-| `MCk.png` | MC_k カーブ（横軸 k、縦軸 MC_k、train/test 別） |
-| `MCk.csv` | MCk プロット元データ（`delay, mck_train, mck_test`） |
-| `MCk_prediction/k=<k>.dat` | 各遅延 k の予測値 |
 
 ---
 

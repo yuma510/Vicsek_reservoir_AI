@@ -87,6 +87,30 @@ def plot_nrmse_vs_rcut(summaries: list[dict], out_path):
     plt.close()
 
 
+def plot_correlation_by_rcut_single_seed(summaries: list[dict], seed: int, out_path):
+    """Overlay C(Δt) curves for all rcut values at a single seed."""
+    filtered = [s for s in summaries if s.get("seed") == seed]
+    if not filtered:
+        print(f"  seed={seed} not found — skipping single-seed plot.")
+        return
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    cmap = plt.get_cmap("viridis")
+    rcuts = sorted(s["rcut"] for s in filtered)
+    colors = {r: cmap(i / max(len(rcuts) - 1, 1)) for i, r in enumerate(rcuts)}
+    for s in sorted(filtered, key=lambda x: x["rcut"]):
+        ax.plot(s["dts"], s["correlations"],
+                label=f"rcut={s['rcut']:.0f}", color=colors[s["rcut"]])
+    ax.set_xlabel("Time lag Δt (frames)")
+    ax.set_ylabel("Normalised correlation")
+    ax.set_title(f"Network Correlation Decay  (seed={seed})")
+    ax.set_ylim(0, 1.05)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8, ncol=2)
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+
 def plot_mc_vs_rcut(summaries: list[dict], out_path):
     """MC (train & test) vs rcut."""
     data = [(s["rcut"], s["reservoir"]["MC_train"], s["reservoir"]["MC_test"])

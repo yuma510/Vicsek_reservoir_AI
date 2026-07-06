@@ -1,6 +1,7 @@
 # シミュレーションデータ（大容量・数百MB/ファイル）
 data/
 tmp/
+narma_data/
 reservoir_data/
 
 # コンパイル済みバイナリ

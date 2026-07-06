@@ -16,15 +16,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from vicsek_rc import evaluate_reservoir, find_exp_dir, write_params_used
+from vicsek_rc import (evaluate_reservoir, find_exp_dir, write_params_used, load_reservoir_defaults,
+                       new_narma_dir, iter_narma_dirs, save_narma_params)
 from generate_narma10 import generate_narma10 as _narma10_gen
 
 BINARY = str(ROOT / "vicsek_dynamic")
 
-# evaluate_reservoir のデフォルト（readout=sin, ridge_lambda=1e-11）に対応
+_RC = load_reservoir_defaults()
 RESERVOIR_DEFAULTS = {
-    "readout": 1, "washout": 2000, "train_num": 7000,
-    "ridge_lambda": 1e-11, "k_max": 100,
+    "readout":      _RC["readout"],
+    "washout":      _RC["washout"],
+    "train_num":    _RC["train_num"],
+    "ridge_lambda": _RC["ridge_lambda"],
+    "k_max":        _RC["k_max"],
 }
 
 
@@ -48,51 +52,63 @@ def collect_model_params(rcut_values, trial_seeds, data_dir):
 
 # ── Phase 0: NARMA10 生成 ─────────────────────────────────────────────────
 
-def ensure_narma10(seed, narma_dir, low=0.0, high=0.5, length=12000):
-    narma_dir = Path(narma_dir)
-    narma_dir.mkdir(parents=True, exist_ok=True)
-    prefix      = f"{low}:{high}_seed{seed}"
-    input_path  = narma_dir / f"narma10_input_{prefix}.dat"
-    target_path = narma_dir / f"narma10_target_{prefix}.dat"
-    if not input_path.exists() or not target_path.exists():
-        u, y = _narma10_gen(length, low, high, seed)
-        if not np.all(np.isfinite(y)):
-            n_bad = np.sum(~np.isfinite(y))
-            print(f"[NARMA10] WARN seed={seed}: {n_bad} non-finite values (diverged) — "
-                  f"skip this trial", flush=True)
-            return None, None
-        np.savetxt(input_path, u)
-        np.savetxt(target_path, y)
-        print(f"[NARMA10] Generated seed={seed}", flush=True)
-    else:
-        y = np.loadtxt(target_path)
-        if not np.all(np.isfinite(y)):
-            n_bad = np.sum(~np.isfinite(y))
-            print(f"[NARMA10] WARN seed={seed}: existing file has {n_bad} non-finite values "
-                  f"(diverged) — skip this trial", flush=True)
-            return None, None
-        print(f"[NARMA10] Skip seed={seed} (exists)", flush=True)
+def ensure_narma10(seed, narma_root, low=0.0, high=0.5, length=14000):
+    """既存の日付 dir から十分な長さの NARMA を再利用し、無ければ専用の新しい日付 dir に生成する
+    （1 時刻 dir = 1 データセット）。"""
+    prefix   = f"{low}:{high}_seed{seed}"
+    in_name  = f"narma10_input_{prefix}.dat"
+    tgt_name = f"narma10_target_{prefix}.dat"
+
+    # narma_root 以下（日付 dir を新しい順、末尾に直下）から再利用
+    for d in iter_narma_dirs(narma_root):
+        input_path, target_path = d / in_name, d / tgt_name
+        if input_path.exists() and target_path.exists() \
+                and sum(1 for _ in open(target_path)) >= length:
+            y = np.loadtxt(target_path)
+            if not np.all(np.isfinite(y)):
+                n_bad = np.sum(~np.isfinite(y))
+                print(f"[NARMA10] WARN seed={seed}: existing file has {n_bad} non-finite values "
+                      f"(diverged) — skip this trial", flush=True)
+                return None, None
+            print(f"[NARMA10] Skip seed={seed} (exists, {len(y)} rows) [{d.name}]", flush=True)
+            return input_path, target_path
+
+    # 無ければ seed 専用の新しい日付 dir に生成
+    u, y = _narma10_gen(length, low, high, seed)
+    if not np.all(np.isfinite(y)):
+        n_bad = np.sum(~np.isfinite(y))
+        print(f"[NARMA10] WARN seed={seed}: {n_bad} non-finite values (diverged) — "
+              f"skip this trial", flush=True)
+        return None, None
+    gen_dir = new_narma_dir(narma_root)
+    input_path, target_path = gen_dir / in_name, gen_dir / tgt_name
+    np.savetxt(input_path, u)
+    np.savetxt(target_path, y)
+    save_narma_params(gen_dir, in_name, tgt_name, length, seed, low, high)
+    print(f"[NARMA10] Generated seed={seed} (length={length}) [{gen_dir.name}]", flush=True)
     return input_path, target_path
 
 
 # ── Phase 1: シミュレーション ─────────────────────────────────────────────
 
 def _run_one_sim(args):
-    rcut, seed, input_path, data_dir = args
+    rcut, seed, input_path, data_dir, v0 = args
     import json, os, subprocess, tempfile
     cfg = {
         "input_file":  str(input_path),
         "output_base": str(data_dir),
         "rcut":        float(rcut),
         "sgm":         0.0,
+        "v0":          float(v0),
         "seed_noise":  seed + 2,
         "seed_pos":    seed + 3,
         "seed_nf":     seed + 6,
+        "ntime":       140000,
     }
     fd, cfg_path = tempfile.mkstemp(suffix=".json")
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(cfg, f)
+            json.dump(cfg, f, indent=2)
         result = subprocess.run([BINARY, cfg_path], capture_output=True, text=True)
     finally:
         os.unlink(cfg_path)
@@ -103,11 +119,11 @@ def _run_one_sim(args):
     return rcut, seed, result.returncode
 
 
-def phase1_simulate(rcut_values, trial_seeds, narma_paths, data_dir, n_jobs):
+def phase1_simulate(rcut_values, trial_seeds, narma_paths, data_dir, n_jobs, v0=0.5):
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    jobs = [(r, s, narma_paths[s][0], data_dir) for r in rcut_values for s in trial_seeds]
+    jobs = [(r, s, narma_paths[s][0], data_dir, v0) for r in rcut_values for s in trial_seeds]
     print(f"Phase 1: launching {len(jobs)} simulations (n_jobs={n_jobs}) …", flush=True)
 
     failed = []
@@ -232,14 +248,16 @@ def parse_args():
                    help="各trialのseed。NARMA10入力（narma10 seed）と自然振動数（seed_array[6]）の両方に使用。デフォルト: 1..10")
     p.add_argument("--n-jobs", type=int, default=4,
                    help="parallel simulation workers")
-    p.add_argument("--data-dir", default="data/rcut_sweep",
+    p.add_argument("--data-dir", default="data",
                    help="directory for simulation output")
     p.add_argument("--output-dir", default="analysis/rcut_sweep",
                    help="directory for evaluation results and plots")
-    p.add_argument("--narma-dir", default="tmp",
+    p.add_argument("--narma-dir", default="narma_data",
                    help="NARMA10 入力・正解ファイルの保存先（trial seedごとに自動生成）")
     p.add_argument("--skip-sim", action="store_true",
                    help="skip simulation phase, only evaluate existing data")
+    p.add_argument("--v0", type=float, default=0.5,
+                   help="particle speed (default: 0.5; use 0.0 for static network)")
     return p.parse_args()
 
 
@@ -250,6 +268,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Phase 0: 各 trial seed の NARMA10 ファイルを生成（なければ）。発散したシードは除外
+    # 生成する seed ごとに専用の日付 dir を作る（1 dir = 1 データセット。既存は再利用）
     narma_paths = {
         s: ensure_narma10(s, args.narma_dir)
         for s in args.trial_seeds
@@ -261,7 +280,7 @@ def main():
 
     if not args.skip_sim:
         phase1_simulate(args.rcut_values, valid_seeds,
-                        narma_paths, args.data_dir, args.n_jobs)
+                        narma_paths, args.data_dir, args.n_jobs, args.v0)
 
     results = phase2_evaluate(args.rcut_values, valid_seeds,
                               narma_paths, args.data_dir, output_dir)

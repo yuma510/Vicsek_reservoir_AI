@@ -1,0 +1,7 @@
+{
+  "ridge_lambda": 1e-9,
+  "train_num":    6000,
+  "washout":      2000,
+  "k_max":        100,
+  "readout":      1
+}

@@ -1,4 +1,4 @@
-"""解析プロットの使用パラメータ記録（params_used.json）。
+"""解析プロットの使用パラメータ記録（params_used.json）とデフォルト設定ロード。
 
 掃引（rcut/sgm/seed/λ/train_num 等）した解析では、全 sim の params_model.json を
 丸ごと保存すると冗長なので、固定パラメータと掃引パラメータを自動判別して
@@ -6,6 +6,14 @@
 """
 import json
 from pathlib import Path
+
+_RC_CONFIG = Path(__file__).parent.parent / "configs" / "default_reservoir_params.json"
+
+
+def load_reservoir_defaults() -> dict:
+    """configs/default_reservoir_params.json からレザバーデフォルト値を読み込む。"""
+    with open(_RC_CONFIG) as f:
+        return json.load(f)
 
 
 def _hashable(value):

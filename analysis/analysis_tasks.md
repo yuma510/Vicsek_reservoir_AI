@@ -12,5 +12,10 @@
 | 4 | rcut vs MC/NRMSE（散布図） | 完了 | [task_04](tasks/task_04_rcut_sweep.md) |
 | 5 | sgm vs MC/NRMSE（散布図） | 完了 | [task_05](tasks/task_05_sgm_sweep.md) |
 | 6 | noise-averaged 状態評価 | 完了 | [task_06](tasks/task_06_sgm_mean_state.md) |
+| 7 | λ × train_num 掃引（ridge sweep） | 完了 | [task_07](tasks/task_07_ridge.md) |
+| 8 | 高次リードアウト | — | [task_08](tasks/task_08_higher_order_readout.md) |
+| 9 | θ_i(t) 時間変化プロット | 完了 | [task_09](tasks/task_09_theta_plot.md) |
+| 10 | 予測値平均の性能（S 掃引） | 完了 | [task_10](tasks/task_10_pred_mean.md) |
+| 11 | IPC 測定（デフォルトパラメータ、次数 2 まで） | 完了 | [task_11](tasks/task_11_ipc.md) |
 
 [メモ（解析アイデア・候補）](tasks/memo.md)
