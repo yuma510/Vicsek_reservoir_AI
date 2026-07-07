@@ -14,6 +14,7 @@
 | `ridge_sweep/` | `run_ridge_sweep.py` | `data/<ts>_ridge_sweep/`（自動生成） | λ × train_num 2D 掃引で最適リッジ回帰設定を探索 | `ridge_sweep/<YYYYMMDD_HHMMSS>/` |
 | `pred_mean/` | `pred_mean.py` | `data/`（noise-avg 集合を seed_pos=13/seed_nf=16 で選択） | 各 noise 実現の予測を S 個平均し S vs MC/NRMSE を評価（task_06 の予測平均版、task_10） | `pred_mean/<YYYYMMDD_HHMMSS>/` |
 | `ipc/` | `ipc.py` | `data/`（rcut=13, sgm=0, ntime=220000 の複数 seed） | 正規化 Legendre 多項式積を基底にした IPC を次数 2 まで計算（task_11） | `ipc/<YYYYMMDD_HHMMSS>/` |
+| `higher_order_readout/` | `higher_order_readout.py` | `data/`（複数 v0/rcut/sgm × seed） | P=500 ランダムペア積項を追加した拡張リードアウトで MC/NRMSE を評価、2×2 ヒートマップ出力（task_08） | `higher_order_readout/<YYYYMMDD_HHMMSS>/` |
 
 ## データフロー
 

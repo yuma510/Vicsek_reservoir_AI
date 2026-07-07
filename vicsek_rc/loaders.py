@@ -59,13 +59,13 @@ def delayed_input(raw_input: np.ndarray, delay: int, length: int) -> np.ndarray:
     return padded[:length]
 
 
-def find_exp_dir(data_dir, *, rcut=None, sgm=None, seed=None,
+def find_exp_dir(data_dir, *, rcut=None, sgm=None, v0=None, seed=None,
                  seed_index=None, seed_key=None) -> Path | None:
     """
     Return the newest experiment directory under `data_dir` whose
     params_model.json matches the given filters.
 
-    - rcut / sgm: matched within 1e-6 tolerance when not None.
+    - rcut / sgm / v0: matched within 1e-6 tolerance when not None.
     - seed_key: new format — matched against params[seed_key] directly.
     - seed_index: old format — matched against params["seed"][seed_index].
     """
@@ -82,6 +82,8 @@ def find_exp_dir(data_dir, *, rcut=None, sgm=None, seed=None,
         if rcut is not None and abs(p.get("rcut", -1) - rcut) >= 1e-6:
             continue
         if sgm is not None and abs(p.get("sgm", -1) - sgm) >= 1e-6:
+            continue
+        if v0 is not None and abs(p.get("v0", -1) - v0) >= 1e-6:
             continue
         if seed is not None:
             if seed_key is not None:

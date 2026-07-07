@@ -32,15 +32,17 @@ RESERVOIR_DEFAULTS = {
 }
 
 
-def collect_model_params(sgm_values, seeds, rcut, data_dir):
+def collect_model_params(sgm_values, seeds, rcut, data_dir, v0=None):
     """評価に使った各 sim dir の params_model.json を集める（キャッシュ skip 時も網羅）。"""
     data_dir = Path(data_dir)
     params_list = []
     for sgm in sgm_values:
         for seed in seeds:
-            exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed+3, seed_key="seed_pos")
+            exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed+3,
+                                   seed_key="seed_pos", v0=v0)
             if exp_dir is None:
-                exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed, seed_index=0)
+                exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed,
+                                       seed_index=0, v0=v0)
             if exp_dir is None:
                 continue
             pf = exp_dir / "params_model.json"
@@ -53,7 +55,7 @@ def collect_model_params(sgm_values, seeds, rcut, data_dir):
 # ── Phase 1: simulation ────────────────────────────────────────────────────
 
 def _run_one_sim(args):
-    sgm, seed, rcut, input_path, data_dir = args
+    sgm, seed, rcut, input_path, data_dir, v0 = args
     import json, os, tempfile
     cfg = {
         "input_file":  str(input_path),
@@ -65,6 +67,8 @@ def _run_one_sim(args):
         "seed_nf":     seed + 6,
         "ntime":       140000,
     }
+    if v0 is not None:
+        cfg["v0"] = float(v0)
     fd, cfg_path = tempfile.mkstemp(suffix=".json")
     try:
         with os.fdopen(fd, "w") as f:
@@ -79,11 +83,19 @@ def _run_one_sim(args):
     return sgm, seed, result.returncode
 
 
-def phase1_simulate(sgm_values, seeds, rcut, input_path, data_dir, n_jobs):
+def phase1_simulate(sgm_values, seeds, rcut, input_path, data_dir, n_jobs, v0=None):
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    jobs = [(s, sd, rcut, input_path, data_dir) for s in sgm_values for sd in seeds]
+    # 既存 sim はスキップ（v0 フィルタ付き）
+    jobs = []
+    for s in sgm_values:
+        for sd in seeds:
+            if find_exp_dir(data_dir, rcut=rcut, sgm=s, seed=sd+3,
+                            seed_key="seed_pos", v0=v0) is not None:
+                print(f"[SKIP SIM] sgm={s} seed_pos={sd+3} (already exists)", flush=True)
+                continue
+            jobs.append((s, sd, rcut, input_path, data_dir, v0))
     print(f"Phase 1: launching {len(jobs)} simulations (n_jobs={n_jobs}) …", flush=True)
 
     failed = []
@@ -102,7 +114,7 @@ def phase1_simulate(sgm_values, seeds, rcut, input_path, data_dir, n_jobs):
 # ── Phase 2: reservoir evaluation ─────────────────────────────────────────
 
 def phase2_evaluate(sgm_values, seeds, rcut, data_dir, output_dir,
-                    target_path, input_path):
+                    target_path, input_path, v0=None):
     data_dir   = Path(data_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -118,9 +130,11 @@ def phase2_evaluate(sgm_values, seeds, rcut, data_dir, output_dir,
                     results[key] = json.load(f)
                 continue
 
-            exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed+3, seed_key="seed_pos")
+            exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed+3,
+                                   seed_key="seed_pos", v0=v0)
             if exp_dir is None:
-                exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed, seed_index=0)
+                exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed,
+                                       seed_index=0, v0=v0)
             if exp_dir is None:
                 print(f"[MISS] no dir for {key}", flush=True)
                 continue
@@ -222,6 +236,8 @@ def parse_args():
                    help="NARMA10 target signal（未指定なら最新日付 dir から自動解決）")
     p.add_argument("--skip-sim", action="store_true",
                    help="skip simulation, only evaluate existing data")
+    p.add_argument("--v0", type=float, default=None,
+                   help="粒子速度 v0（未指定: default_params.json に従う）")
     args = p.parse_args()
 
     if args.input_path is None or args.target_path is None:
@@ -242,18 +258,19 @@ def main():
 
     if not args.skip_sim:
         phase1_simulate(args.sgm_values, args.seeds, args.rcut,
-                        args.input_path, args.data_dir, args.n_jobs)
+                        args.input_path, args.data_dir, args.n_jobs, v0=args.v0)
 
     results = phase2_evaluate(args.sgm_values, args.seeds, args.rcut,
                               args.data_dir, output_dir,
-                              args.target_path, args.input_path)
+                              args.target_path, args.input_path, v0=args.v0)
 
     if results:
         phase3_plot(results, output_dir)
     else:
         print("[WARN] No results to plot.", flush=True)
 
-    model_params = collect_model_params(args.sgm_values, args.seeds, args.rcut, args.data_dir)
+    model_params = collect_model_params(args.sgm_values, args.seeds, args.rcut,
+                                        args.data_dir, v0=args.v0)
     if model_params:
         write_params_used(output_dir, model_params, RESERVOIR_DEFAULTS)
         print(f"  params_used.json", flush=True)
