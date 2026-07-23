@@ -32,7 +32,7 @@ import pandas as pd
 
 from vicsek_rc import (
     load_position_fast, build_states, delayed_input, find_exp_dir,
-    nrmse, nrmse2, mck_score, write_params_used,
+    nrmse, nrmse2, mck_score, memory_capacity, write_params_used,
     ridge_gram_decomp, ridge_solve_gram,
     new_narma_dir, iter_narma_dirs, save_narma_params,
 )
@@ -230,9 +230,10 @@ def _eval_one_seed(seed, data_group_dir, narma_paths, output_dir):
                 "nrmse_train": nr_tr,   "nrmse_test":   nr_te,
                 "nrmse_gap":   nr_te - nr_tr,
                 "nrmse2_train": nr2_tr, "nrmse2_test":  nr2_te,
-                "mc_train":    float(np.sum(mc_tr_vals)),
-                "mc_test":     float(np.sum(mc_te_vals)),
-                "mc_gap":      float(np.sum(mc_tr_vals) - np.sum(mc_te_vals)),
+                "mc_train":    memory_capacity(mc_tr_vals, threshold, cutoff_ref=mc_te_vals),
+                "mc_test":     memory_capacity(mc_te_vals, threshold),
+                "mc_gap":      (memory_capacity(mc_tr_vals, threshold, cutoff_ref=mc_te_vals)
+                                - memory_capacity(mc_te_vals, threshold)),
             })
 
         print(f"  train_num={T} done", flush=True)

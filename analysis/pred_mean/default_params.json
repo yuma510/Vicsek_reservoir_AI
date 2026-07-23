@@ -1,0 +1,14 @@
+{
+  "sgm_values": [0.1, 0.2, 0.3, 0.4, 0.5],
+  "seed_noise_start": 33,
+  "seed_noise_end": 102,
+  "rcut": 13.0,
+  "seed_pos": 13,
+  "seed_nf": 16,
+  "ntime": 140000,
+  "v0": 0.5,
+  "narma_seed": 666,
+  "n_jobs": 12,
+  "n_orderings": 20,
+  "ordering_seed": 42
+}

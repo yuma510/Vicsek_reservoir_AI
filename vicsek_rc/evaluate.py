@@ -2,7 +2,7 @@
 import numpy as np
 
 from .loaders import load_position_fast, build_states
-from .metrics import nrmse, nrmse2, mck_score
+from .metrics import nrmse, nrmse2, mck_score, memory_capacity
 from .params_io import load_reservoir_defaults
 
 _RC = load_reservoir_defaults()
@@ -125,6 +125,6 @@ def evaluate_reservoir(pos_path, params: dict,
     return {
         "nrmse_train": nr_train,   "nrmse_test":   nr_test,
         "nrmse2_train": nr2_train, "nrmse2_test":  nr2_test,
-        "MC_train": float(np.sum(mck_train_list)),
-        "MC_test":  float(np.sum(mck_test_list)),
+        "MC_train": memory_capacity(mck_train_list, threshold, cutoff_ref=mck_test_list),
+        "MC_test":  memory_capacity(mck_test_list, threshold),
     }

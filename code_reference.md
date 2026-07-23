@@ -166,6 +166,7 @@ y_m  += h1 · v0 · sin(θ_m)
 | `utime` | 10 | 入力1点あたりのステップ数 |
 | `ntime` | 120000 | 総ステップ数（= 12000 × utime） |
 | `rcut` | 1.0 | 相互作用カットオフ（単一値、CLI で指定） |
+| `n_driver` | N | 入力を受ける粒子数（粒子 0 〜 n_driver-1 が対象）。-1 または省略時は全粒子（N と同じ） |
 | `write_adjacency` | 0 | 隣接行列を `adjacency/` に出力するか（0=off, 1=on） |
 
 ### RNG 設計
@@ -227,6 +228,7 @@ JSON フォーマット（`configs/default_params.json` 参照 / `params_model.j
 {
   "model": 1,
   "N": 500,
+  "n_driver": 500,
   "boxsize": 15.800000,
   "ntime": 120000,
   "utime": 10,
@@ -252,6 +254,19 @@ JSON フォーマット（`configs/default_params.json` 参照 / `params_model.j
 リザバー状態として使われるのは3列目の `theta`（粒子の向き）。
 
 ---
+
+## vicsek_rc/metrics.py — Memory Capacity の定義（唯一の実装）
+
+MC の総和は **`memory_capacity(mck, threshold, cutoff_ref=None)` に一本化**（重複実装禁止）。
+
+- `mck[k]` = 遅延 k の MC_k（先頭が k=0）。**標準定義に従い遅延 k=0 は総和に含めない**
+  （k=0 は現在入力の自明な再構成で MC_0≈1 になるため）。2026-07-20 にこの定義へ変更
+  （それ以前の出力は k=0 を含む値。新 = 旧 − MC_0 ≈ 旧 − 1）。
+- 総和は k=1 から、テスト側 MC_k が最初に `threshold = N/train_num` 以下になる遅延（その項を含む）まで。
+- MC_train は `cutoff_ref` にテスト MC_k 列を渡し、打ち切り位置をテストと揃える。
+- 早期打ち切りで truncate 済みの list でも full 配列でも同じ結果。
+- 呼び出し側: `evaluate_reservoir`（evaluate.py）、`pred_mean.py`、`sgm_mean_state.py`、
+  `higher_order_readout.py`、`run_ridge_sweep.py`。IPC（`ipc.py`）は別定義で対象外。
 
 ## vicsek_rc/evaluate.py — 主要関数
 
@@ -291,6 +306,52 @@ find_exp_dir(data_dir, *, rcut=None, sgm=None,
 
 新しいシミュレーション（JSON設定で実行）では `seed_key="seed_pos"` を使用する。
 既存データ（旧 argv 形式で生成）は `seed_index=0` にフォールバックする。
+
+**カタログ対応**: `<data_dir>/index.csv` が存在すれば `find_exp_dir` はそれを引いて該当 dir を返す
+（全 dir 走査を回避し高速化）。無ければ従来どおり全 dir を走査する（フォールバック）。両経路は同一 dir を返す
+（`_find_exp_dir_from_index` がフィルタ条件・「dir 名昇順の最後＝最新」の選択規則を走査版と一致させる）。
+
+---
+
+## vicsek_rc/catalog.py — データカタログ `index.csv`
+
+`data/` はフラットに多数のタイムスタンプ dir を並べる（CLAUDE.md §4.1）。目視で見通せないため、
+全 dir の `params_model.json` を 1 表にまとめた `data/index.csv` を生成する。
+
+| 関数 | 説明 |
+|---|---|
+| `build_catalog(data_dir="data")` | 各 dir を dir 名昇順にスキャンし 1 dir = 1 行の `DataFrame` を返す |
+| `write_catalog(data_dir="data", out=None)` | 上を `<data_dir>/index.csv` に書き出す（default 出力先） |
+| `load_catalog(data_dir="data")` | `index.csv` があれば読む、無ければ `None`（`find_exp_dir` が使用） |
+| `append_row(data_dir, exp_dir)` | 新規 sim 1 dir を追記（全スキャン不要。index.csv 未生成時は no-op） |
+
+- 列: `dir, mtime, size_MB, has_position, has_params` + モデルパラメータ
+  （`model,N,boxsize,ntime,utime,h1,v0,sgm,K,F,c,rcut,rho`）+ seed（新: `seed_pos/seed_noise/seed_nf`、
+  旧: `seed` を連結文字列）+ `write_adjacency,input_file`（任意）。
+- CLI: `python -m vicsek_rc.catalog [--data-dir data] [--out ...]`。スイープ後に再生成する（手動運用）。
+- 書き出しは pandas `to_csv(index=False)`（CLAUDE.md §5.2 の CSV 方針に合致）。
+
+---
+
+## vicsek_rc/correlation.py — 隣接ネットワーク相関減衰
+
+| 関数 | 説明 |
+|---|---|
+| `correlation_at_lag(matrices, dt, n_base)` | ラグ dt の相関 `C(dt) = mean_t[Σ(A(t)·A(t+dt)) / ΣA(t)]`（Python ループ版、参照実装） |
+| `compute_correlation_decay(matrices, dt_max)` | dt=0〜dt_max の減衰曲線。**FFT（相互相関）による厳密同値の高速実装**（2026-07-15 改修） |
+| `load_position_dat(path, N, frame_start, frame_end)` | position.dat の指定フレーム範囲を (T, N, 3) で読み込み |
+| `compute_adjacency_from_positions(pos_frame, rcut, boxsize)` | 1 フレームの座標から N×N bool 隣接行列（周期境界） |
+
+### `compute_correlation_decay` の FFT 実装（2026-07-15）
+
+- 推定量は `correlation_at_lag` と同一: 基底フレームを辺数で正規化した `B(t)=A(t)/ΣA(t)` と
+  生フレーム `A(t+dt)` の時間方向相互相関を成分ごとに FFT で計算し、成分和を n_valid で割る。
+- 全ラグで同一の `n_base = T − dt_max` 基底フレームを使用（旧実装と同じ）。
+- 辺数 0 の基底フレームは重み 0 で除外（旧実装の skip と同値）。`corrs[0] = 1.0` 固定も同じ。
+- 旧ループ実装比の誤差 ~1e-7（float32 FFT）。dt_max=2000・T=6001・N=500 で約 90 秒/実験
+  （旧実装では数時間/実験）。メモリはチャンク処理（4096 列/バッチ）で約 4 GB に抑制。
+- `analysis/correlation_analysis/default_params.json` の既定値: `frame_end=8001, dt_max=2000`
+  （フレーム 2000〜8000 = 訓練区間、n_base=4001）。
 
 ---
 

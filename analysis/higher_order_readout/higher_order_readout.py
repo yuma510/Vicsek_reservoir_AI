@@ -22,7 +22,7 @@ from vicsek_rc import (
     find_narma_by_seed, load_reservoir_defaults, write_params_used,
 )
 from vicsek_rc.loaders import load_position_fast, build_states
-from vicsek_rc.metrics import mck_score, nrmse
+from vicsek_rc.metrics import mck_score, nrmse, memory_capacity
 from vicsek_rc.plotting import apply_style
 
 _RC = load_reservoir_defaults()
@@ -36,11 +36,22 @@ RESERVOIR_DEFAULTS = {
     "k_max":        _RC["k_max"],
 }
 
+# base(P=0) MC がこの値未満なら、駆動入力の取り違え等でリザバーが入力を
+# 全く記憶していない退化状態とみなし、その sim を集計から除外する。
+# 正常時は最小でも O(1)（例 rcut=13 sgm>0 で ~1.1）なのに対し、不一致時は ~1e-4。
+MC_DEGENERATE_THRESHOLD = 0.1
+
 
 # ── データ探索 ────────────────────────────────────────────────────────────────
 
-def _scan_sims(data_dir: Path, v0: float, rcut: float, sgm: float):
-    """(seed_pos, sim_dir) リストを返す（同一条件の全 seed を収集）。"""
+def _scan_sims(data_dir: Path, v0: float, rcut: float, sgm: float,
+               seed_pos_keep=None):
+    """(seed_pos, sim_dir) リストを返す（同一条件の seed を収集）。
+
+    seed_pos_keep（集合/リスト）を渡すと、その seed_pos のセルのみ採用し、
+    全 (rcut,sgm) セルの平均 seed 数を揃える。
+    """
+    keep = set(seed_pos_keep) if seed_pos_keep is not None else None
     results = {}  # seed_pos → newest dir
     for d in sorted(data_dir.iterdir()):
         if not d.is_dir():
@@ -59,6 +70,8 @@ def _scan_sims(data_dir: Path, v0: float, rcut: float, sgm: float):
         seed_pos = p.get("seed_pos")
         if seed_pos is None:
             continue
+        if keep is not None and seed_pos not in keep:
+            continue
         if not (d / "position.dat").exists():
             continue
         results[seed_pos] = d  # 最新 dir で上書き
@@ -76,17 +89,16 @@ def _load_narma(sim_dir: Path, params: dict, narma_root: Path):
     sgm = float(params.get("sgm", 0.0))
     seed_pos = params.get("seed_pos")
 
-    # 1. input_file フィールドあり
+    # 1. input_file フィールドあり: u と y を必ず同一ファイル対から取る
+    #    （target は input のファイル名 input→target 置換で一意に決まる）
     if "input_file" in params:
         ip = Path(params["input_file"])
         if not ip.is_absolute():
             ip = ROOT / ip
         if ip.exists():
-            u = np.loadtxt(ip)[:n_frames]
-            # target: same seed, same convention
-            narma_seed_guess = _infer_narma_seed(params, sgm)
-            _, tp = find_narma_by_seed(narma_root, narma_seed_guess)
-            if tp is not None:
+            tp = ip.with_name(ip.name.replace("narma10_input_", "narma10_target_", 1))
+            if tp.exists():
+                u = np.loadtxt(ip)[:n_frames]
                 y = np.loadtxt(tp)[:n_frames]
                 return u, y
 
@@ -164,71 +176,76 @@ def _evaluate_ext(X: np.ndarray, u_full: np.ndarray, y_full: np.ndarray,
         if mc_k <= threshold:
             break
 
-    return float(nrmse_test), float(np.sum(mc_list))
+    return float(nrmse_test), memory_capacity(mc_list, threshold)
 
 
 # ── プロット ──────────────────────────────────────────────────────────────────
 
+def _plot_metric(agg, metric, metric_label, cmap, sgm_vals, rcut_vals,
+                 v0_labels, out_path):
+    """1 指標を v0 パネル横並び（1×len(v0)）の 1 図として保存する。"""
+    n_sgm = len(sgm_vals)
+    n_rcut = len(rcut_vals)
+
+    fig, axes = plt.subplots(1, len(v0_labels),
+                             figsize=(4 * len(v0_labels), 3.2),
+                             squeeze=False)
+    for col, v0 in enumerate(v0_labels):
+        ax = axes[0][col]
+        sub = agg[np.abs(agg["v0"] - v0) < 1e-6]
+
+        mat = np.full((n_rcut, n_sgm), np.nan)
+        for ri, rc in enumerate(rcut_vals):
+            for si, sg in enumerate(sgm_vals):
+                row_data = sub[
+                    (np.abs(sub["rcut"] - rc) < 1e-6) &
+                    (np.abs(sub["sgm"]  - sg) < 1e-6)
+                ]
+                if not row_data.empty:
+                    mat[ri, si] = float(row_data[metric].iloc[0])
+
+        im = ax.imshow(mat, origin="lower", aspect="auto", cmap=cmap)
+        plt.colorbar(im, ax=ax)
+        ax.set_xticks(range(n_sgm))
+        ax.set_xticklabels([f"{s:.1f}" for s in sgm_vals])
+        ax.set_yticks(range(n_rcut))
+        ax.set_yticklabels([str(int(r)) for r in rcut_vals])
+        ax.set_xlabel("sgm")
+        ax.set_ylabel("rcut")
+        ax.set_title(f"v0={v0:.1f}  {metric_label}")
+
+        for ri in range(n_rcut):
+            for si in range(n_sgm):
+                v = mat[ri, si]
+                if not np.isnan(v):
+                    ax.text(si, ri, f"{v:.3f}", ha="center", va="center",
+                            fontsize=6, color="black")
+
+    fig.suptitle(f"Higher-order readout (P=500) — {metric_label}", y=1.02)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  {out_path.name}", flush=True)
+
+
 def _make_heatmap(df: pd.DataFrame, sgm_values, rcut_values, v0_values, out_dir: Path):
-    """2×2 ヒートマップ（v0 × 指標）を保存する。"""
+    """MC・NRMSE を別画像で保存する（各図 v0 パネル横並び、rcut×sgm）。"""
     apply_style()
 
     sgm_vals = sorted(sgm_values)
     rcut_vals = sorted(rcut_values)
-    n_sgm = len(sgm_vals)
-    n_rcut = len(rcut_vals)
 
-    # P=500 のみ使用
+    # P=500 のみ使用。seed_pos × pair_seed 平均
     df500 = df[df["n_pairs"] == 500]
-    # seed_pos × pair_seed 平均
     agg = (df500.groupby(["v0", "rcut", "sgm"])[["mc_test", "nrmse_test"]]
                .mean().reset_index())
 
-    metrics = [("mc_test", "MC_test", "Blues"), ("nrmse_test", "NRMSE_test", "Reds_r")]
-    v0_labels = sorted(v0_values, reverse=True)  # 上行が大きい v0
+    v0_labels = sorted(v0_values, reverse=True)  # 左パネルが大きい v0
 
-    fig, axes = plt.subplots(len(v0_labels), len(metrics),
-                             figsize=(4 * len(metrics), 3 * len(v0_labels)),
-                             squeeze=False)
-
-    for row, v0 in enumerate(v0_labels):
-        sub = agg[np.abs(agg["v0"] - v0) < 1e-6]
-        for col, (metric, metric_label, cmap) in enumerate(metrics):
-            ax = axes[row][col]
-
-            mat = np.full((n_rcut, n_sgm), np.nan)
-            for ri, rc in enumerate(rcut_vals):
-                for si, sg in enumerate(sgm_vals):
-                    row_data = sub[
-                        (np.abs(sub["rcut"] - rc) < 1e-6) &
-                        (np.abs(sub["sgm"]  - sg) < 1e-6)
-                    ]
-                    if not row_data.empty:
-                        mat[ri, si] = float(row_data[metric].iloc[0])
-
-            im = ax.imshow(mat, origin="lower", aspect="auto", cmap=cmap)
-            plt.colorbar(im, ax=ax)
-            ax.set_xticks(range(n_sgm))
-            ax.set_xticklabels([f"{s:.1f}" for s in sgm_vals])
-            ax.set_yticks(range(n_rcut))
-            ax.set_yticklabels([str(int(r)) for r in rcut_vals])
-            ax.set_xlabel("sgm")
-            ax.set_ylabel("rcut")
-            ax.set_title(f"v0={v0:.1f}  {metric_label}")
-
-            for ri in range(n_rcut):
-                for si in range(n_sgm):
-                    v = mat[ri, si]
-                    if not np.isnan(v):
-                        ax.text(si, ri, f"{v:.3f}", ha="center", va="center",
-                                fontsize=6, color="black")
-
-    fig.suptitle("Higher-order readout (P=500) — 2×2 heatmap", y=1.01)
-    fig.tight_layout()
-    out_path = out_dir / "heatmap_mc_nrmse.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  heatmap_mc_nrmse.png", flush=True)
+    _plot_metric(agg, "mc_test", "MC_test", "Blues",
+                 sgm_vals, rcut_vals, v0_labels, out_dir / "heatmap_mc.png")
+    _plot_metric(agg, "nrmse_test", "NRMSE_test", "Reds_r",
+                 sgm_vals, rcut_vals, v0_labels, out_dir / "heatmap_nrmse.png")
 
 
 # ── メイン ────────────────────────────────────────────────────────────────────
@@ -242,8 +259,12 @@ def parse_args():
     p.add_argument("--rcut-values", nargs="+", type=float, default=_CA.get("rcut_values", [1.0, 5.0, 13.0]),
                    metavar="R", help="評価する rcut 値（default: 1 5 13）")
     p.add_argument("--sgm-values", nargs="+", type=float,
-                   default=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5],
-                   metavar="S", help="評価する sgm 値（default: 0..0.5）")
+                   default=_CA.get("sgm_values", [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]),
+                   metavar="S", help="評価する sgm 値（default: default_params.json）")
+    p.add_argument("--seed-pos", nargs="+", type=int,
+                   default=_CA.get("seed_pos_keep"),
+                   metavar="SP", help="平均に使う seed_pos 集合（default: default_params.json）。"
+                                       "未指定なら全 seed_pos を使用")
     p.add_argument("--n-pairs", type=int, default=_CA["n_pairs"],
                    help=f"ランダムペア数 P（default: {_CA['n_pairs']}）")
     p.add_argument("--n-pair-seeds", type=int, default=_CA["n_pair_seeds"],
@@ -277,7 +298,7 @@ def main():
               for sgm  in args.sgm_values]
 
     for v0, rcut, sgm in combos:
-        sim_list = _scan_sims(data_dir, v0, rcut, sgm)
+        sim_list = _scan_sims(data_dir, v0, rcut, sgm, seed_pos_keep=args.seed_pos)
         if not sim_list:
             print(f"[MISS] v0={v0} rcut={rcut} sgm={sgm}: no sim found", flush=True)
             continue
@@ -308,6 +329,13 @@ def main():
                 X_base, u, y,
                 args.washout, args.train_num, args.ridge_lambda, args.k_max, N,
             )
+            # ガード: base MC が退化 or NRMSE が非有限 → 入力取り違え等の疑い。
+            # 破損値・NaN を CSV/ヒートマップへ混入させないため、この sim を除外する。
+            if mc0 < MC_DEGENERATE_THRESHOLD or not np.isfinite(nr0):
+                print(f"  [SKIP] v0={v0} rcut={rcut} sgm={sgm} seed_pos={seed_pos}: "
+                      f"退化 (base MC={mc0:.2e}, NRMSE={nr0}). 駆動入力の不一致の可能性 — 集計から除外",
+                      flush=True)
+                continue
             rows.append({"v0": v0, "rcut": rcut, "sgm": sgm,
                          "seed_pos": seed_pos, "n_pairs": 0, "pair_seed": -1,
                          "nrmse_test": nr0, "mc_test": mc0})
@@ -347,6 +375,7 @@ def main():
             "k_max":        args.k_max,
             "n_pairs":      args.n_pairs,
             "n_pair_seeds": args.n_pair_seeds,
+            "seed_pos":     args.seed_pos,
         }
         write_params_used(out_dir, model_params_list, reservoir_fixed)
         print(f"  params_used.json", flush=True)

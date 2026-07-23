@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 from vicsek_rc import (
-    nrmse, nrmse2, mck_score, ridge_predict,
+    nrmse, nrmse2, mck_score, memory_capacity, ridge_predict, ridge_gram_decomp,
     load_theta, build_noise_averaged_states, write_params_used,
     load_reservoir_defaults, find_narma_by_seed,
 )
@@ -94,24 +94,98 @@ def phase1_simulate(sgm_values, noise_seeds, rcut, input_path, data_dir, n_jobs)
 
 # ── Phase 2: noise-averaged evaluation ────────────────────────────────────
 
-def _scan_experiments(data_dir: Path, sgm_values: list, noise_seeds: list):
-    """Return dict[sgm][noise_seed] = exp_dir, sorted by noise_seed."""
+def _scan_experiments(data_dir: Path, sgm_values: list, noise_seeds: list,
+                      rcut: float, seed_pos: int = 13, seed_nf: int = 16,
+                      v0: float = 0.5, narma_seed: int | None = None):
+    """Return dict[sgm][noise_seed] = exp_dir, sorted by noise_seed.
+
+    noise-averaged 集合を厳密に選ぶため seed_pos・seed_nf・rcut・v0 で絞る
+    （flat な data/ には別実験が混在するため）。narma_seed 指定時は
+    input_file が別 NARMA seed のシムも除外する（未記録の旧シムは通す）。
+    重複キーは dir 名昇順の走査で新しい dir が勝つ。
+    """
     by_sgm: dict[float, dict[int, Path]] = {sgm: {} for sgm in sgm_values}
 
     for d in sorted(data_dir.iterdir()):
         pf = d / "params_model.json"
         if not d.is_dir() or not pf.exists():
             continue
-        with open(pf) as f:
-            params = json.load(f)
+        try:
+            with open(pf) as f:
+                params = json.load(f)
+        except Exception:
+            continue
+        if params.get("seed_pos") != seed_pos or params.get("seed_nf") != seed_nf:
+            continue
+        if rcut is not None and abs(float(params.get("rcut", -1)) - rcut) >= 1e-6:
+            continue
+        if v0 is not None and abs(float(params.get("v0", -1)) - v0) >= 1e-6:
+            continue
+        inf = params.get("input_file")
+        if narma_seed is not None and inf and f"seed{narma_seed}.dat" not in inf:
+            continue
         sgm = round(float(params["sgm"]), 4)
-        ns  = int(params["seed_noise"] if "seed_noise" in params else params["seed"][2])
+        ns  = params.get("seed_noise")
+        if ns is None:
+            continue
+        ns = int(ns)
         for target_sgm in sgm_values:
             if abs(sgm - round(target_sgm, 4)) < 1e-6 and ns in noise_seeds:
                 by_sgm[target_sgm][ns] = d
                 break
 
     return by_sgm
+
+
+def _evaluate_states_batched(states: np.ndarray, params: dict,
+                             target: np.ndarray, col_input: np.ndarray,
+                             washout: int, train_num: int, k_max: int,
+                             ridge_lambda: float = _RC["ridge_lambda"]) -> dict:
+    """1 つの状態行列を Gram 固有分解 1 回で評価する（NARMA + 全遅延を一括 ridge）。
+
+    メトリクスの定義・スライス・MC の打ち切り規則は _evaluate_noise_avg
+    （ridge_predict を遅延ごとに呼ぶ旧実装）と同一。
+    """
+    N               = params["N"]
+    total_num       = params["ntime"] // params["utime"]
+    train_end_frame = washout + train_num
+    threshold       = N / train_num
+    length          = states.shape[0]
+    eval_total      = min(total_num, target.shape[0], length)
+    train_end       = min(train_end_frame, eval_total)
+
+    delayed = [np.concatenate([np.zeros(k), col_input])[:length] for k in range(k_max + 1)]
+
+    # ridge_predict と同じ学習区間 [washout:train_end_frame+1]（全ターゲット共通）
+    solve_end = min(train_end_frame + 1, length, target.shape[0])
+    X = states[washout:solve_end]
+    Y_train = np.column_stack([target[washout:solve_end]]
+                              + [t[washout:solve_end] for t in delayed])
+    vals, vecs = ridge_gram_decomp(X)
+    W = vecs @ ((vecs.T @ (X.T @ Y_train)) / (vals + ridge_lambda)[:, None])
+    preds = states @ W                       # (length, 1 + k_max+1)
+
+    y_pred = preds[:, 0]
+    nr_train  = nrmse( target[washout:train_end],    y_pred[washout:train_end])
+    nr_test   = nrmse( target[train_end:eval_total], y_pred[train_end:eval_total])
+    nr2_train = nrmse2(target[washout:train_end],    y_pred[washout:train_end])
+    nr2_test  = nrmse2(target[train_end:eval_total], y_pred[train_end:eval_total])
+
+    tr_s = slice(washout, min(train_end_frame + 1, length))
+    te_s = slice(min(train_end_frame, length), min(total_num, length))
+    mck_train_list, mck_test_list = [], []
+    for k in range(k_max + 1):
+        mck_train_list.append(mck_score(delayed[k][tr_s], preds[tr_s, 1 + k]))
+        mck_test_list.append(mck_score(delayed[k][te_s], preds[te_s, 1 + k]))
+        if mck_test_list[-1] <= threshold:
+            break
+
+    return {
+        "nrmse_train": float(nr_train),   "nrmse_test":  float(nr_test),
+        "nrmse2_train": float(nr2_train), "nrmse2_test": float(nr2_test),
+        "MC_train": memory_capacity(mck_train_list, threshold, cutoff_ref=mck_test_list),
+        "MC_test":  memory_capacity(mck_test_list, threshold),
+    }
 
 
 def _evaluate_noise_avg(theta_list: list, params: dict,
@@ -152,8 +226,8 @@ def _evaluate_noise_avg(theta_list: list, params: dict,
         results[S] = {
             "nrmse_train": nr_train,   "nrmse_test":   nr_test,
             "nrmse2_train": nr2_train, "nrmse2_test":  nr2_test,
-            "MC_train": float(np.sum(mck_train_list)),
-            "MC_test":  float(np.sum(mck_test_list)),
+            "MC_train": memory_capacity(mck_train_list, threshold, cutoff_ref=mck_test_list),
+            "MC_test":  memory_capacity(mck_test_list, threshold),
         }
         print(f"    S={S:2d}  MC_test={results[S]['MC_test']:.3f}  NRMSE_test={results[S]['nrmse_test']:.4f}", flush=True)
 
@@ -164,11 +238,15 @@ def phase2_evaluate(sgm_values, noise_seeds, rcut, data_dir, output_dir,
                     target_path, input_path,
                     washout: int = _RC["washout"],
                     train_num: int = _RC["train_num"],
-                    k_max: int = _RC["k_max"]):
+                    k_max: int = _RC["k_max"],
+                    seed_pos: int = 13, seed_nf: int = 16,
+                    v0: float = 0.5, narma_seed: int | None = None):
     data_dir   = Path(data_dir)
     output_dir = Path(output_dir)
 
-    by_sgm = _scan_experiments(data_dir, sgm_values, noise_seeds)
+    by_sgm = _scan_experiments(data_dir, sgm_values, noise_seeds, rcut,
+                               seed_pos=seed_pos, seed_nf=seed_nf,
+                               v0=v0, narma_seed=narma_seed)
 
     target    = np.loadtxt(target_path)
     raw_input = np.loadtxt(input_path)
@@ -194,19 +272,25 @@ def phase2_evaluate(sgm_values, noise_seeds, rcut, data_dir, output_dir,
             all_results[sgm] = {int(k): v for k, v in raw.items()}
             continue
 
-        # Load all theta arrays (shape: (12000, N) each)
         exp_dir_0 = ns_map[sorted_seeds[0]]
         with open(exp_dir_0 / "params_model.json") as f:
             params = json.load(f)
 
-        theta_list = []
-        for ns in sorted_seeds:
-            pos_path = ns_map[ns] / "position.dat"
-            theta_list.append(load_theta(pos_path, params["N"]))
-
-        s_values = list(range(1, s_max + 1))
-        res = _evaluate_noise_avg(theta_list, params, target, col_input,
-                                  s_values, washout, train_num, k_max)
+        # 逐次蓄積: θ を 1 実現ずつ読み、複素和 cum に足して S ごとに評価する
+        # （全実現を保持せずメモリ一定、build_noise_averaged_states と同一の状態定義）
+        res = {}
+        cum = None
+        for S, ns in enumerate(sorted_seeds, start=1):
+            theta = load_theta(ns_map[ns] / "position.dat", params["N"])
+            e = np.exp(1j * theta)
+            cum = e if cum is None else cum + e
+            theta_avg = np.angle(cum / S)
+            states = np.sin(theta_avg)
+            states = np.hstack([np.ones((states.shape[0], 1)), states])
+            res[S] = _evaluate_states_batched(states, params, target, col_input,
+                                              washout, train_num, k_max)
+            print(f"    S={S:3d} (seed={ns:3d})  MC_test={res[S]['MC_test']:.3f}  "
+                  f"NRMSE_test={res[S]['nrmse_test']:.4f}", flush=True)
 
         all_results[sgm] = res
         with open(cache_file, "w") as f:
@@ -248,9 +332,42 @@ def phase3_plot(all_results: dict, output_dir: Path):
     fig.savefig(output_dir / "mc_nrmse_vs_S.png", dpi=150)
     plt.close(fig)
 
+    plot_baseline_nolegend(all_results, output_dir)
+
     print(f"\nPlots saved to {output_dir}/", flush=True)
     print(f"  mc_nrmse_vs_S.png", flush=True)
     print(f"  noise_avg_data.csv", flush=True)
+
+
+def plot_baseline_nolegend(all_results, output_dir, baseline_sgm=0.0, ymax=None):
+    """発表用: 折れ線・凡例なし。sgm=baseline_sgm は水平ベースライン（黒破線）で描く。
+
+    sgm=0 はノイズなしで S に依らず一定なので、他 sgm 曲線の比較基準として
+    全 S 域に水平線で引く。マーカーなしの折れ線。縦軸は 0 起点。
+    ymax: メトリクス名（"MC"/"nrmse"）→ 縦軸上限の dict（複数図で揃えたいとき）。
+    """
+    output_dir = Path(output_dir)
+    ymax = ymax or {}
+    for key, ylabel, fname, mkey in [
+        ("MC_test",    "MC (test)",    "mc_vs_S_baseline_nolegend.png",    "MC"),
+        ("nrmse_test", "NRMSE (test)", "nrmse_vs_S_baseline_nolegend.png", "nrmse"),
+    ]:
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        for sgm, by_S in sorted(all_results.items()):
+            xs = sorted(by_S)
+            ys = [by_S[s][key] for s in xs]
+            if abs(sgm - baseline_sgm) < 1e-9:
+                ax.axhline(ys[0], color="k", ls="--", lw=1.5)
+            else:
+                ax.plot(xs, ys, lw=1.8)
+        ax.set_xlabel("S (# noise realizations)")
+        ax.set_ylabel(ylabel)
+        ax.set_ylim(0, ymax.get(mkey))
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(output_dir / fname, dpi=150)
+        plt.close(fig)
+        print(f"  {fname}", flush=True)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────
@@ -262,6 +379,9 @@ def parse_args():
     p.add_argument("--noise-seeds", nargs="+", type=int,
                    default=list(range(1, 11)), metavar="NS")
     p.add_argument("--rcut", type=float, default=13)
+    p.add_argument("--seed-pos", type=int, default=13, help="固定した初期位置 seed（noise-avg 集合の識別）")
+    p.add_argument("--seed-nf",  type=int, default=16, help="固定した自然振動数 seed（noise-avg 集合の識別）")
+    p.add_argument("--v0", type=float, default=0.5, help="v0 フィルタ（v0=0 実験の混入防止）")
     p.add_argument("--n-jobs", type=int, default=4)
     p.add_argument("--data-dir",    default="data")
     p.add_argument("--output-dir",  default="analysis/sgm_mean_state")
@@ -303,6 +423,8 @@ def main():
         args.data_dir, output_dir,
         args.target_path, args.input_path,
         washout=args.washout, train_num=args.train_num,
+        seed_pos=args.seed_pos, seed_nf=args.seed_nf,
+        v0=args.v0, narma_seed=args.narma_seed,
     )
 
     if all_results:
@@ -311,7 +433,9 @@ def main():
         print("[WARN] No results to plot.", flush=True)
 
     # 使用パラメータの記録（S=noise 平均数は解析軸として swept に記録）
-    by_sgm = _scan_experiments(Path(args.data_dir), args.sgm_values, args.noise_seeds)
+    by_sgm = _scan_experiments(Path(args.data_dir), args.sgm_values, args.noise_seeds,
+                               args.rcut, seed_pos=args.seed_pos, seed_nf=args.seed_nf,
+                               v0=args.v0, narma_seed=args.narma_seed)
     model_params = []
     s_max = 0
     for ns_map in by_sgm.values():
