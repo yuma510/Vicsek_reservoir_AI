@@ -59,7 +59,8 @@ def delayed_input(raw_input: np.ndarray, delay: int, length: int) -> np.ndarray:
     return padded[:length]
 
 
-def _find_exp_dir_from_index(df, data_dir, *, rcut, sgm, v0, seed, seed_index, seed_key):
+def _find_exp_dir_from_index(df, data_dir, *, rcut, sgm, v0, ntime, utime,
+                             narma_seed, seed, seed_index, seed_key):
     """index.csv（DataFrame）から find_exp_dir と同じ選択規則で最新 dir を返す。
 
     全 dir 走査の代わりに index を引く高速経路。走査版と同一の結果を返すよう、
@@ -72,6 +73,16 @@ def _find_exp_dir_from_index(df, data_dir, *, rcut, sgm, v0, seed, seed_index, s
         m &= (df["sgm"] - sgm).abs() < 1e-6
     if v0 is not None:
         m &= (df["v0"] - v0).abs() < 1e-6
+    if ntime is not None:
+        m &= df["ntime"] == ntime
+    if utime is not None:
+        m &= df["utime"] == utime
+    if narma_seed is not None:
+        # 別 NARMA で駆動された（と記録された）実験を除外。input_file 未記録(NaN)は
+        # 検証不能なので残す（旧スイープシムを取りこぼさないためのフォールバック）
+        inf = df["input_file"] if "input_file" in df.columns else None
+        if inf is not None:
+            m &= inf.isna() | inf.astype(str).str.contains(f"seed{narma_seed}.dat", regex=False)
     if seed is not None:
         if seed_key is not None:
             # 新フォーマット: params[seed_key] を直接照合（列が無ければ一致なし）
@@ -91,13 +102,17 @@ def _find_exp_dir_from_index(df, data_dir, *, rcut, sgm, v0, seed, seed_index, s
     return Path(data_dir) / str(newest)
 
 
-def find_exp_dir(data_dir, *, rcut=None, sgm=None, v0=None, seed=None,
-                 seed_index=None, seed_key=None) -> Path | None:
+def find_exp_dir(data_dir, *, rcut=None, sgm=None, v0=None, ntime=None, utime=None,
+                 narma_seed=None, seed=None, seed_index=None, seed_key=None) -> Path | None:
     """
     Return the newest experiment directory under `data_dir` whose
     params_model.json matches the given filters.
 
     - rcut / sgm / v0: matched within 1e-6 tolerance when not None.
+    - ntime / utime: matched exactly when not None（フラットな data/ に混在する
+      別実験（例: rcut_utime_heatmap の ntime≠140000）の誤マッチを防ぐ）。
+    - narma_seed: input_file が別 NARMA seed で駆動された実験を除外する。
+      input_file 未記録（NaN）のシムは検証不能なため残す（旧スイープ互換）。
     - seed_key: new format — matched against params[seed_key] directly.
     - seed_index: old format — matched against params["seed"][seed_index].
 
@@ -110,8 +125,8 @@ def find_exp_dir(data_dir, *, rcut=None, sgm=None, v0=None, seed=None,
     df = load_catalog(data_dir)
     if df is not None:
         return _find_exp_dir_from_index(
-            df, data_dir, rcut=rcut, sgm=sgm, v0=v0,
-            seed=seed, seed_index=seed_index, seed_key=seed_key)
+            df, data_dir, rcut=rcut, sgm=sgm, v0=v0, ntime=ntime, utime=utime,
+            narma_seed=narma_seed, seed=seed, seed_index=seed_index, seed_key=seed_key)
 
     candidates = []
     for d in sorted(data_dir.iterdir()):
@@ -128,6 +143,14 @@ def find_exp_dir(data_dir, *, rcut=None, sgm=None, v0=None, seed=None,
             continue
         if v0 is not None and abs(p.get("v0", -1) - v0) >= 1e-6:
             continue
+        if ntime is not None and p.get("ntime") != ntime:
+            continue
+        if utime is not None and p.get("utime") != utime:
+            continue
+        if narma_seed is not None:
+            inf = p.get("input_file")
+            if inf and f"seed{narma_seed}.dat" not in inf:
+                continue
         if seed is not None:
             if seed_key is not None:
                 if p.get(seed_key) != seed:

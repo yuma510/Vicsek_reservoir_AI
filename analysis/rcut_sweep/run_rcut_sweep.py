@@ -32,15 +32,17 @@ RESERVOIR_DEFAULTS = {
 }
 
 
-def collect_model_params(rcut_values, trial_seeds, data_dir):
+def collect_model_params(rcut_values, trial_seeds, data_dir, v0=0.5):
     """評価に使った各 sim dir の params_model.json を集める（キャッシュ skip 時も網羅）。"""
     data_dir = Path(data_dir)
     params_list = []
     for rcut in rcut_values:
         for seed in trial_seeds:
-            exp_dir = find_exp_dir(data_dir, rcut=rcut, seed=seed+3, seed_key="seed_pos")
+            exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=0.0, v0=v0, ntime=140000, narma_seed=seed,
+                                   seed=seed+3, seed_key="seed_pos")
             if exp_dir is None:
-                exp_dir = find_exp_dir(data_dir, rcut=rcut, seed=seed, seed_index=0)
+                exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=0.0, v0=v0, ntime=140000, narma_seed=seed,
+                                       seed=seed, seed_index=0)
             if exp_dir is None:
                 continue
             pf = exp_dir / "params_model.json"
@@ -141,7 +143,7 @@ def phase1_simulate(rcut_values, trial_seeds, narma_paths, data_dir, n_jobs, v0=
 
 # ── Phase 2: リザバー評価 ─────────────────────────────────────────────────
 
-def phase2_evaluate(rcut_values, trial_seeds, narma_paths, data_dir, output_dir):
+def phase2_evaluate(rcut_values, trial_seeds, narma_paths, data_dir, output_dir, v0=0.5):
     data_dir   = Path(data_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -157,9 +159,13 @@ def phase2_evaluate(rcut_values, trial_seeds, narma_paths, data_dir, output_dir)
                     results[key] = json.load(f)
                 continue
 
-            exp_dir = find_exp_dir(data_dir, rcut=rcut, seed=seed+3, seed_key="seed_pos")
+            # v0/sgm/ntime でフィルタしないと、フラットな data/ の別実験
+            # （例: rcut_utime_heatmap の v0=0/ntime≠140000）を誤って拾う
+            exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=0.0, v0=v0, ntime=140000, narma_seed=seed,
+                                   seed=seed+3, seed_key="seed_pos")
             if exp_dir is None:
-                exp_dir = find_exp_dir(data_dir, rcut=rcut, seed=seed, seed_index=0)
+                exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=0.0, v0=v0, ntime=140000, narma_seed=seed,
+                                       seed=seed, seed_index=0)
             if exp_dir is None:
                 print(f"[MISS] no dir for {key}", flush=True)
                 continue
@@ -324,14 +330,14 @@ def main():
                         narma_paths, args.data_dir, args.n_jobs, args.v0)
 
     results = phase2_evaluate(args.rcut_values, valid_seeds,
-                              narma_paths, args.data_dir, output_dir)
+                              narma_paths, args.data_dir, output_dir, v0=args.v0)
 
     if results:
         phase3_plot(results, args.rcut_values, output_dir)
     else:
         print("[WARN] No results to plot.", flush=True)
 
-    model_params = collect_model_params(args.rcut_values, valid_seeds, args.data_dir)
+    model_params = collect_model_params(args.rcut_values, valid_seeds, args.data_dir, v0=args.v0)
     if model_params:
         write_params_used(output_dir, model_params, RESERVOIR_DEFAULTS)
         print(f"  params_used.json", flush=True)

@@ -32,17 +32,17 @@ RESERVOIR_DEFAULTS = {
 }
 
 
-def collect_model_params(sgm_values, seeds, rcut, data_dir, v0=None):
+def collect_model_params(sgm_values, seeds, rcut, data_dir, v0=None, narma_seed=None):
     """評価に使った各 sim dir の params_model.json を集める（キャッシュ skip 時も網羅）。"""
     data_dir = Path(data_dir)
     params_list = []
     for sgm in sgm_values:
         for seed in seeds:
             exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed+3,
-                                   seed_key="seed_pos", v0=v0)
+                                   seed_key="seed_pos", v0=v0, ntime=140000, narma_seed=narma_seed)
             if exp_dir is None:
                 exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed,
-                                       seed_index=0, v0=v0)
+                                       seed_index=0, v0=v0, ntime=140000, narma_seed=narma_seed)
             if exp_dir is None:
                 continue
             pf = exp_dir / "params_model.json"
@@ -83,7 +83,7 @@ def _run_one_sim(args):
     return sgm, seed, result.returncode
 
 
-def phase1_simulate(sgm_values, seeds, rcut, input_path, data_dir, n_jobs, v0=None):
+def phase1_simulate(sgm_values, seeds, rcut, input_path, data_dir, n_jobs, v0=None, narma_seed=None):
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -92,7 +92,7 @@ def phase1_simulate(sgm_values, seeds, rcut, input_path, data_dir, n_jobs, v0=No
     for s in sgm_values:
         for sd in seeds:
             if find_exp_dir(data_dir, rcut=rcut, sgm=s, seed=sd+3,
-                            seed_key="seed_pos", v0=v0) is not None:
+                            seed_key="seed_pos", v0=v0, ntime=140000, narma_seed=narma_seed) is not None:
                 print(f"[SKIP SIM] sgm={s} seed_pos={sd+3} (already exists)", flush=True)
                 continue
             jobs.append((s, sd, rcut, input_path, data_dir, v0))
@@ -114,7 +114,7 @@ def phase1_simulate(sgm_values, seeds, rcut, input_path, data_dir, n_jobs, v0=No
 # ── Phase 2: reservoir evaluation ─────────────────────────────────────────
 
 def phase2_evaluate(sgm_values, seeds, rcut, data_dir, output_dir,
-                    target_path, input_path, v0=None):
+                    target_path, input_path, v0=None, narma_seed=None):
     data_dir   = Path(data_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -131,10 +131,10 @@ def phase2_evaluate(sgm_values, seeds, rcut, data_dir, output_dir,
                 continue
 
             exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed+3,
-                                   seed_key="seed_pos", v0=v0)
+                                   seed_key="seed_pos", v0=v0, ntime=140000, narma_seed=narma_seed)
             if exp_dir is None:
                 exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed,
-                                       seed_index=0, v0=v0)
+                                       seed_index=0, v0=v0, ntime=140000, narma_seed=narma_seed)
             if exp_dir is None:
                 print(f"[MISS] no dir for {key}", flush=True)
                 continue
@@ -258,6 +258,8 @@ def parse_args():
                    metavar="S", help="sgm values to sweep (default: 0.0..0.5)")
     p.add_argument("--rcut", type=float, default=13,
                    help="fixed rcut value (default: 13)")
+    p.add_argument("--v0", type=float, default=0.5,
+                   help="fixed v0 value (default: 0.5; v0=0 実験の誤マッチ防止に使用)")
     p.add_argument("--seeds", nargs="+", type=int,
                    default=[10, 11, 12, 13, 14],
                    metavar="SD", help="noise seeds (seed_array[2])")
@@ -299,11 +301,11 @@ def main():
 
     if not args.skip_sim:
         phase1_simulate(args.sgm_values, args.seeds, args.rcut,
-                        args.input_path, args.data_dir, args.n_jobs, v0=args.v0)
+                        args.input_path, args.data_dir, args.n_jobs, v0=args.v0, narma_seed=args.narma_seed)
 
     results = phase2_evaluate(args.sgm_values, args.seeds, args.rcut,
                               args.data_dir, output_dir,
-                              args.target_path, args.input_path, v0=args.v0)
+                              args.target_path, args.input_path, v0=args.v0, narma_seed=args.narma_seed)
 
     if results:
         phase3_plot(results, output_dir)
@@ -311,7 +313,7 @@ def main():
         print("[WARN] No results to plot.", flush=True)
 
     model_params = collect_model_params(args.sgm_values, args.seeds, args.rcut,
-                                        args.data_dir, v0=args.v0)
+                                        args.data_dir, v0=args.v0, narma_seed=args.narma_seed)
     if model_params:
         write_params_used(output_dir, model_params, RESERVOIR_DEFAULTS)
         print(f"  params_used.json", flush=True)
