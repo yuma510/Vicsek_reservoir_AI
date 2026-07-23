@@ -15,28 +15,32 @@ def apply_style():
     })
 
 
-def plot_correlation_decay_all(summaries: list[dict], out_path):
+def plot_correlation_decay_all(summaries: list[dict], out_path, legend: bool = True):
     """Overlay correlation decay curves for all rcut values."""
     fig, ax = plt.subplots(figsize=(7, 4.5))
     cmap = plt.get_cmap("viridis")
     rcuts = sorted(set(s["rcut"] for s in summaries))
     colors = {r: cmap(i / max(len(rcuts) - 1, 1)) for i, r in enumerate(rcuts)}
 
+    labelled = set()   # 凡例は rcut ごとに 1 エントリ（seed 数分の重複を避ける）
     for s in sorted(summaries, key=lambda x: x["rcut"]):
-        ax.plot(s["dts"], s["correlations"],
-                label=f"rcut={s['rcut']:.0f}", color=colors[s["rcut"]])
+        label = f"rcut={s['rcut']:.0f}" if s["rcut"] not in labelled else None
+        labelled.add(s["rcut"])
+        ax.plot(s["dts"], s["correlations"], label=label, color=colors[s["rcut"]])
     ax.set_xlabel("Time lag Δt (frames)")
     ax.set_ylabel("Normalised correlation")
     ax.set_title("Network Correlation Decay — all rcut")
     ax.set_ylim(0, 1.05)
     ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=8, ncol=2)
+    if legend:
+        ax.legend(fontsize=8, ncol=2)
     plt.tight_layout()
     plt.savefig(out_path)
     plt.close()
 
 
-def plot_correlation_vs_rcut(summaries: list[dict], target_dts: list[int], out_path):
+def plot_correlation_vs_rcut(summaries: list[dict], target_dts: list[int], out_path,
+                             legend: bool = True):
     """Correlation value at selected Δt values vs rcut."""
     markers = ["o", "s", "^", "D"]
     fig, ax = plt.subplots(figsize=(6, 4))
@@ -52,7 +56,8 @@ def plot_correlation_vs_rcut(summaries: list[dict], target_dts: list[int], out_p
     ax.set_title("Network Correlation vs rcut")
     ax.set_ylim(0, 1.05)
     ax.grid(True, alpha=0.3)
-    ax.legend()
+    if legend:
+        ax.legend()
     plt.tight_layout()
     plt.savefig(out_path)
     plt.close()
@@ -87,7 +92,8 @@ def plot_nrmse_vs_rcut(summaries: list[dict], out_path):
     plt.close()
 
 
-def plot_correlation_by_rcut_single_seed(summaries: list[dict], seed: int, out_path):
+def plot_correlation_by_rcut_single_seed(summaries: list[dict], seed: int, out_path,
+                                         legend: bool = True):
     """Overlay C(Δt) curves for all rcut values at a single seed."""
     filtered = [s for s in summaries if s.get("seed") == seed]
     if not filtered:
@@ -105,7 +111,8 @@ def plot_correlation_by_rcut_single_seed(summaries: list[dict], seed: int, out_p
     ax.set_title(f"Network Correlation Decay  (seed={seed})")
     ax.set_ylim(0, 1.05)
     ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=8, ncol=2)
+    if legend:
+        ax.legend(fontsize=8, ncol=2)
     plt.tight_layout()
     plt.savefig(out_path)
     plt.close()

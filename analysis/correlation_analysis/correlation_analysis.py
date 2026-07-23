@@ -151,8 +151,8 @@ def parse_args():
                    help="Directory where results are saved.")
     p.add_argument("--dt-max", type=int, default=_CA["dt_max"],
                    help="Maximum time lag for correlation computation (default: 50).")
-    p.add_argument("--target-dts", type=int, nargs="+", default=[1, 5, 10],
-                   help="Δt values for the 'Correlation vs rcut' plot (default: 1 5 10).")
+    p.add_argument("--target-dts", type=int, nargs="+", default=[1, 5, 10, 1000],
+                   help="Δt values for the 'Correlation vs rcut' plot (default: 1 5 10 1000).")
     p.add_argument("--run-reservoir", action="store_true",
                    help="Also run reservoir evaluation (NRMSE, MC) on each experiment.")
     p.add_argument("--narma-root", default="narma_data",

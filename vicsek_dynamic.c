@@ -216,7 +216,7 @@ static void load_input(const char *filename, double *u, int n)
     fclose(fp);
 }
 
-static void write_params(const char *filename, int model, int N, double boxsize,
+static void write_params(const char *filename, int model, int N, int n_driver, double boxsize,
                           long ntime, int utime, double h1, double v0, double sgm,
                           double K, double F, double c, double rcut, double rho,
                           long seed_noise, long seed_pos, long seed_nf,
@@ -229,6 +229,7 @@ static void write_params(const char *filename, int model, int N, double boxsize,
         "{\n"
         "  \"model\": %d,\n"
         "  \"N\": %d,\n"
+        "  \"n_driver\": %d,\n"
         "  \"boxsize\": %.6f,\n"
         "  \"ntime\": %ld,\n"
         "  \"utime\": %d,\n"
@@ -246,7 +247,7 @@ static void write_params(const char *filename, int model, int N, double boxsize,
         "  \"write_adjacency\": %d,\n"
         "  \"input_file\": \"%s\"\n"
         "}\n",
-        model, N, boxsize, ntime, utime, h1, v0, sgm, K, F, c, rcut, rho,
+        model, N, n_driver, boxsize, ntime, utime, h1, v0, sgm, K, F, c, rcut, rho,
         seed_noise, seed_pos, seed_nf, write_adjacency, input_file);
     fclose(fp);
 }
@@ -303,7 +304,7 @@ static void normalize_theta(double *theta)
 typedef struct {
     char   input_file[CFG_STR_LEN];
     char   output_base[CFG_STR_LEN];
-    int    N, utime;
+    int    N, n_driver, utime;
     long   ntime;
     double boxsize, rho, v0, K, F, c, h1, rcut, sgm;
     long   seed_noise, seed_pos, seed_nf;  /* -1 = 未指定（デフォルト使用） */
@@ -317,6 +318,7 @@ static cfg_t make_default_cfg(void)
     strncpy(cfg.input_file,  "tmp/narma10_input_0.0:0.5_seed666.dat", CFG_STR_LEN - 1);
     strncpy(cfg.output_base, "data", CFG_STR_LEN - 1);
     cfg.N          = 500;
+    cfg.n_driver   = -1;  /* -1 = N と同じ（全粒子） */
     cfg.utime      = 10;
     cfg.ntime      = 120000;
     cfg.boxsize    = 15.8;
@@ -347,6 +349,7 @@ static void parse_config(const char *path, cfg_t *cfg)
         if (sscanf(line, " \"output_base\": \"%511[^\"]\"", buf) == 1)
             strncpy(cfg->output_base, buf, CFG_STR_LEN - 1);
         if (sscanf(line, " \"N\": %d",           &iv) == 1) cfg->N          = iv;
+        if (sscanf(line, " \"n_driver\": %d",   &iv) == 1) cfg->n_driver   = iv;
         if (sscanf(line, " \"utime\": %d",       &iv) == 1) cfg->utime      = iv;
         if (sscanf(line, " \"ntime\": %ld",      &lv) == 1) cfg->ntime      = lv;
         if (sscanf(line, " \"boxsize\": %lf",    &dv) == 1) cfg->boxsize    = dv;
@@ -415,7 +418,9 @@ int main(int argc, char *argv[])
     snprintf(pos_file,    sizeof(pos_file),    "%s/position.dat",      dirname);
     snprintf(params_file, sizeof(params_file), "%s/params_model.json", dirname);
 
-    write_params(params_file, model, cfg.N, cfg.boxsize, (long)ntime, cfg.utime,
+    if (cfg.n_driver < 0 || cfg.n_driver > cfg.N) cfg.n_driver = cfg.N;
+
+    write_params(params_file, model, cfg.N, cfg.n_driver, cfg.boxsize, (long)ntime, cfg.utime,
                  cfg.h1, cfg.v0, cfg.sgm, cfg.K, cfg.F, cfg.c, cfg.rcut, cfg.rho,
                  seed_array[2], seed_array[3], seed_array[6], cfg.write_adjacency,
                  cfg.input_file);
@@ -456,9 +461,12 @@ int main(int argc, char *argv[])
             double xi = xrng_normal(&rng_noise);
             particle[m].x += cfg.h1 * cfg.v0 * cos(particle[m].theta);
             particle[m].y += cfg.h1 * cfg.v0 * sin(particle[m].theta);
+            double input_term = (m < cfg.n_driver)
+                ? cfg.h1 * cfg.F * sin(cfg.c * v[t_idx] - particle[m].theta)
+                : 0.0;
             particle[m].theta += cfg.h1 * nf[m]
                                + cfg.h1 * cfg.K / cfg.N * ft[m]
-                               + cfg.h1 * cfg.F * sin(cfg.c * v[t_idx] - particle[m].theta)
+                               + input_term
                                + sqrt(cfg.h1) * cfg.sgm * xi;
             normalize_theta(&particle[m].theta);
             apply_periodic_boundary(&particle[m], cfg.boxsize);

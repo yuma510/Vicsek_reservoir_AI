@@ -202,10 +202,51 @@ def phase3_plot(results: dict, output_dir: Path):
         fig.savefig(output_dir / fname, dpi=150)
         plt.close(fig)
 
+    plot_errorbar(rows, output_dir)
+
     print(f"\nPlots saved to {output_dir}/", flush=True)
     for _, _, _, fname in metrics:
         print(f"  {fname}", flush=True)
     print(f"  sgm_sweep_data.csv", flush=True)
+
+
+def plot_errorbar(rows, output_dir, ymax=None):
+    """seed 間の平均±標準偏差を errorbar でプロット（rows は phase3_plot の long 形式）。
+
+    ymax: メトリクス名（"MC"/"nrmse"/"nrmse2"）→ 縦軸上限の dict。
+          複数スイープで縦軸を揃えたいとき指定する（None なら自動）。
+    """
+    output_dir = Path(output_dir)
+    ymax = ymax or {}
+    df = pd.DataFrame(rows)
+    metrics = [
+        ("MC_test",     "MC_train",     "MC (test/train)",     "mc_vs_sgm_errorbar.png",     "MC"),
+        ("nrmse_test",  "nrmse_train",  "NRMSE (test/train)",  "nrmse_vs_sgm_errorbar.png",  "nrmse"),
+        ("nrmse2_test", "nrmse2_train", "NRMSE2 (test/train)", "nrmse2_vs_sgm_errorbar.png", "nrmse2"),
+    ]
+    for test_key, train_key, ylabel, fname, mkey in metrics:
+        g = df.groupby("sgm")
+        xs = sorted(df["sgm"].unique())
+        # 凡例あり（fname）と凡例なし（発表用、_nolegend）の 2 枚を出力
+        for legend in (True, False):
+            fig, ax = plt.subplots(figsize=(7, 4))
+            for key, color, marker, lbl in [(test_key, "tab:blue", "o", "test"),
+                                            (train_key, "tab:red", "^", "train")]:
+                mean = g[key].mean().reindex(xs)
+                std  = g[key].std(ddof=1).reindex(xs)
+                ax.errorbar(xs, mean.values, yerr=std.values, color=color, marker=marker,
+                            capsize=3, ls="-", label=lbl)
+            ax.set_xlabel("sgm")
+            ax.set_ylabel(ylabel)
+            ax.set_ylim(0, ymax.get(mkey))
+            if legend:
+                ax.legend(title="mean ± std (seeds)")
+            ax.grid(True, alpha=0.4)
+            fig.tight_layout()
+            out = fname if legend else fname.replace(".png", "_nolegend.png")
+            fig.savefig(output_dir / out, dpi=150)
+            plt.close(fig)
+            print(f"  {out}", flush=True)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────

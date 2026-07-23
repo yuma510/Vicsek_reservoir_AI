@@ -6,7 +6,8 @@ Vicsek リザバー解析の共通処理を集約したパッケージ。解析�
 | モジュール | 内容 |
 |---|---|
 | `metrics.py` | `nrmse`, `nrmse2`, `corrcoef`, `mck_score` |
-| `loaders.py` | `load_position_fast`, `build_states`, `load_theta`, `load_adjacency_dir`, `delayed_input`, `find_exp_dir` |
+| `loaders.py` | `load_position_fast`, `build_states`, `load_theta`, `load_adjacency_dir`, `delayed_input`, `find_exp_dir`（`index.csv` があれば利用） |
+| `catalog.py` | `build_catalog`, `write_catalog`, `load_catalog`, `append_row`（`data/index.csv` の生成・読み込み。CLI: `python -m vicsek_rc.catalog`） |
 | `evaluate.py` | `ridge_predict`, `evaluate_reservoir`, `compute_theta_mean_states` |
 | `correlation.py` | `correlation_at_lag`, `compute_correlation_decay` |
 | `plotting.py` | `apply_style`, `plot_*`（相関減衰・vs rcut など） |

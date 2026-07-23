@@ -59,6 +59,38 @@ def delayed_input(raw_input: np.ndarray, delay: int, length: int) -> np.ndarray:
     return padded[:length]
 
 
+def _find_exp_dir_from_index(df, data_dir, *, rcut, sgm, v0, seed, seed_index, seed_key):
+    """index.csv（DataFrame）から find_exp_dir と同じ選択規則で最新 dir を返す。
+
+    全 dir 走査の代わりに index を引く高速経路。走査版と同一の結果を返すよう、
+    フィルタ条件・「dir 名昇順の最後（=最新）」の選択規則を厳密に一致させる。
+    """
+    m = df["has_params"].fillna(False).astype(bool)
+    if rcut is not None:
+        m &= (df["rcut"] - rcut).abs() < 1e-6
+    if sgm is not None:
+        m &= (df["sgm"] - sgm).abs() < 1e-6
+    if v0 is not None:
+        m &= (df["v0"] - v0).abs() < 1e-6
+    if seed is not None:
+        if seed_key is not None:
+            # 新フォーマット: params[seed_key] を直接照合（列が無ければ一致なし）
+            m &= (df[seed_key] == seed) if seed_key in df.columns else False
+        elif seed_index is not None:
+            # 旧フォーマット: 連結文字列 "s0,s1,.." の seed_index 番目を照合
+            def _seed_at(s):
+                if not isinstance(s, str) or not s:
+                    return None
+                parts = s.split(",")
+                return int(parts[seed_index]) if seed_index < len(parts) else None
+            m &= df["seed"].map(_seed_at) == seed
+    matched = df[m]
+    if matched.empty:
+        return None
+    newest = matched.sort_values("dir").iloc[-1]["dir"]
+    return Path(data_dir) / str(newest)
+
+
 def find_exp_dir(data_dir, *, rcut=None, sgm=None, v0=None, seed=None,
                  seed_index=None, seed_key=None) -> Path | None:
     """
@@ -68,8 +100,19 @@ def find_exp_dir(data_dir, *, rcut=None, sgm=None, v0=None, seed=None,
     - rcut / sgm / v0: matched within 1e-6 tolerance when not None.
     - seed_key: new format — matched against params[seed_key] directly.
     - seed_index: old format — matched against params["seed"][seed_index].
+
+    `<data_dir>/index.csv` が存在すればそれを引いて高速化する。無ければ全 dir を走査する
+    （後方互換）。両経路は同一の dir を返す。
     """
     data_dir = Path(data_dir)
+
+    from .catalog import load_catalog  # 遅延 import（循環回避）
+    df = load_catalog(data_dir)
+    if df is not None:
+        return _find_exp_dir_from_index(
+            df, data_dir, rcut=rcut, sgm=sgm, v0=v0,
+            seed=seed, seed_index=seed_index, seed_key=seed_key)
+
     candidates = []
     for d in sorted(data_dir.iterdir()):
         if not d.is_dir():

@@ -31,11 +31,43 @@ def compute_correlation_decay(matrices: list[np.ndarray],
     """Return (dt_list, correlation_list) for dt = 0 .. dt_max.
 
     Uses the same n_base = T - dt_max frames for all lags to equalise sample count.
+
+    FFT-based implementation of the same estimator as correlation_at_lag:
+      C(dt) = mean_t [ sum(A(t) * A(t+dt)) / sum(A(t)) ]
+            = (1/n_valid) * Σ_t Σ_ij [A_ij(t)/sum(A(t))] * A_ij(t+dt)
+    i.e. a cross-correlation in t between the edge-normalised base frames and
+    the raw frames, summed over matrix entries. Zero-edge base frames get
+    weight 0 and are excluded from n_valid (same as the loop version).
     """
-    n_base = len(matrices) - dt_max
-    dts   = list(range(dt_max + 1))
-    corrs = [correlation_at_lag(matrices, dt, n_base) for dt in dts]
-    return dts, corrs
+    T = len(matrices)
+    n_base = T - dt_max
+    if n_base < 1:
+        raise ValueError(f"dt_max={dt_max} requires > {dt_max} frames (got {T})")
+    dts = list(range(dt_max + 1))
+
+    X = np.stack([np.asarray(m, dtype=bool).ravel() for m in matrices])  # (T, M)
+    edges = X[:n_base].sum(axis=1).astype(np.float64)
+    valid = edges > 0
+    n_valid = int(valid.sum())
+    if n_valid == 0:
+        return dts, [1.0] + [0.0] * dt_max
+    w_scale = np.zeros(n_base, dtype=np.float32)
+    w_scale[valid] = 1.0 / edges[valid]
+
+    L = 1 << (T - 1).bit_length()          # power of 2 ≥ T → no circular wrap
+    num = np.zeros(dt_max + 1, dtype=np.float64)
+    chunk = 4096                            # columns per FFT batch (memory cap)
+    for s in range(0, X.shape[1], chunk):
+        xb = X[:, s:s + chunk].astype(np.float32)
+        wb = xb[:n_base] * w_scale[:, None]
+        Fx = np.fft.rfft(xb, n=L, axis=0)
+        Fw = np.fft.rfft(wb, n=L, axis=0)
+        c = np.fft.irfft(np.conj(Fw) * Fx, n=L, axis=0)[:dt_max + 1]
+        num += c.sum(axis=1, dtype=np.float64)
+
+    corrs = num / n_valid
+    corrs[0] = 1.0                          # exact, matches correlation_at_lag
+    return dts, [float(v) for v in corrs]
 
 
 def load_position_dat(path, N: int,

@@ -1,0 +1,5 @@
+{
+  "rcut_values":  [1, 3, 5, 7, 10, 13],
+  "utime_values": [10, 20, 30, 40, 50],
+  "trial_seeds":  [1, 2, 3]
+}

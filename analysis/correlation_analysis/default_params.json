@@ -1,4 +1,4 @@
 {
-  "frame_end": 2500,
-  "dt_max": 50
+  "frame_end": 8001,
+  "dt_max": 2000
 }

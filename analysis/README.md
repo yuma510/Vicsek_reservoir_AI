@@ -12,9 +12,11 @@
 | `reservoir_aggregate/` | `reservoir_aggregate.py` | `data/` | `data/` から直接 ridge 予測し、sgm ごとに seeds 間平均して NRMSE・MC を再計算 | `reservoir_aggregate/<sgm_value>/` |
 | `correlation_analysis/` | `correlation_analysis.py` | `data/rcut_sweep/`（position.dat から adjacency を計算） | 隣接行列の時間相関減衰を計算・プロット | `correlation_analysis/<YYYYMMDD_HHMMSS>/` |
 | `ridge_sweep/` | `run_ridge_sweep.py` | `data/<ts>_ridge_sweep/`（自動生成） | λ × train_num 2D 掃引で最適リッジ回帰設定を探索 | `ridge_sweep/<YYYYMMDD_HHMMSS>/` |
-| `pred_mean/` | `pred_mean.py` | `data/`（noise-avg 集合を seed_pos=13/seed_nf=16 で選択） | 各 noise 実現の予測を S 個平均し S vs MC/NRMSE を評価（task_06 の予測平均版、task_10） | `pred_mean/<YYYYMMDD_HHMMSS>/` |
+| `pred_mean/` | `pred_mean.py` | `data/`（noise-avg 集合を seed_pos=13/seed_nf=16/v0=0.5 で選択） | 各 noise 実現の予測を S 個平均し S vs MC/NRMSE を評価（task_06 の予測平均版、task_10） | `pred_mean/<YYYYMMDD_HHMMSS>/` |
+| `pred_mean/` | `generate_noise_realizations.py` | `data/index.csv`（既存確認） | noise-avg 集合の不足 seed_noise 実現を追加シミュレーション（S=100 拡張用、sgm=0 は全実現同一のため対象外）。終了後に index.csv を全再構築 | `data/<YYYYMMDD_HHMMSS>/`（シム本体） |
 | `ipc/` | `ipc.py` | `data/`（rcut=13, sgm=0, ntime=220000 の複数 seed） | 正規化 Legendre 多項式積を基底にした IPC を次数 2 まで計算（task_11） | `ipc/<YYYYMMDD_HHMMSS>/` |
-| `higher_order_readout/` | `higher_order_readout.py` | `data/`（複数 v0/rcut/sgm × seed） | P=500 ランダムペア積項を追加した拡張リードアウトで MC/NRMSE を評価、2×2 ヒートマップ出力（task_08） | `higher_order_readout/<YYYYMMDD_HHMMSS>/` |
+| `higher_order_readout/` | `higher_order_readout.py` | `data/`（v0=0.5/0.0, rcut=1/4/7/10/13, sgm=0〜0.4 × 5 seed=seed_pos{4,5,6,8,9}） | P=500 ランダムペア積項を追加した拡張リードアウトで MC/NRMSE を評価。**MC・NRMSE を別画像**で rcut×sgm ヒートマップ出力（`heatmap_mc.png`/`heatmap_nrmse.png`、各 v0=0.5/0.0 の2パネル、task_08）。結果: sgm=0 のみ rcut/v0 依存、sgm>0 は MC が小さく collapse | `higher_order_readout/<YYYYMMDD_HHMMSS>/` |
+| `rcut_utime_heatmap/` | `rcut_utime_heatmap.py` | `data/`（v0=0, sgm=0, rcut=1〜13 × utime=10/20/30/40/50 × 3 seed） | rcut × utime の MC/NRMSE ヒートマップ生成（task_12）。結果: MC は **utime=20 でピーク**、rcut 小ほど良（20260710_004410） | `rcut_utime_heatmap/<YYYYMMDD_HHMMSS>/` |
 
 ## データフロー
 
@@ -85,6 +87,8 @@ python analysis/correlation_analysis/correlation_analysis.py \
 - ntime=140000（14000フレーム）、等長 train/test=6000 サンプル、λ=1e-9
 - rcut=13: MC_test=8.14±0.30, NRMSE_test=0.164±0.008（9 seed 平均）
 - MC_test 最大の rcut: 12
+- **エラーバー版**（2026-07-20 追記）: `mc_vs_rcut_errorbar.png` 等（seed 間 平均±std）。
+  MC は rcut=1〜4 で平坦（≈4.7）→ rcut=6〜10 でシグモイド状に急増 → rcut≥11 で飽和（≈8.1）
 
 ### rcut_sweep（task_04 v3, v0=0）— 2026-06-23
 
@@ -92,6 +96,7 @@ python analysis/correlation_analysis/correlation_analysis.py \
 - v0=0（静的ネットワーク）、ntime=140000、等長 train/test=6000 サンプル、λ=1e-9
 - MC_test 最大: rcut=2（10.47±1.06）、rcut が大きいほど単調減少（rcut=13: 8.19±0.35）
 - v0=0.5 と rcut=13 での性能はほぼ同一だが、v0=0 は低 rcut で高 MC
+- **エラーバー版**（2026-07-20 追記）: `mc_vs_rcut_errorbar.png` 等（v0=0.5 とは逆の単調減少傾向）
 
 ### sgm_sweep（task_05 v2）— 2026-06-20
 
@@ -99,6 +104,21 @@ python analysis/correlation_analysis/correlation_analysis.py \
 - ntime=140000（14000フレーム）、等長 train/test=6000 サンプル、λ=1e-9
 - sgm が大きいほど MC 低下・NRMSE 上昇（sgm=0: MC=6.9±2.5, sgm=0.5: MC=1.14±0.02）
 - sgm=0 で seed 間ばらつき大（初期条件依存が顕在化）
+- **エラーバー版**（2026-07-20 追記）: `mc_vs_sgm_errorbar.png` 等（10 seed 平均±std）。
+  sgm=0 の大きなエラーバー（±2.5）と sgm≥0.1 での急落・ばらつき縮小が明瞭
+
+### pred_mean / sgm_mean_state S=100 拡張（task_10 / task_06）— 2026-07-18
+
+- データ: noise-avg 集合を各 sgm（0.1〜0.5）**100 実現**に拡張（seed_noise=1〜102 のうち 100 個、
+  `pred_mean/generate_noise_realizations.py` で 350 シム追加生成、約 98 GB）
+- 予測平均（`pred_mean/20260718_104927/`）: **sgm=0.1 は S≈65 で sgm=0 の MC=8.43 を超え、S=100 で MC=10.52**。
+  NRMSE は 0.215 でプラトー（sgm=0 の 0.158 には届かない）
+- 状態平均（`sgm_mean_state/20260718_111815/`）: MC は S=100 でも 4.32 と鈍い。NRMSE は 0.202 と予測平均より良い
+- MC vs S の段差は打ち切り閾値の離散性（`mck_decay_S60_S70.png` 参照）
+- ランダム順列 R=20 の平均±std（`pred_mean/20260720_130529/mc_nrmse_vs_S_errorbar.png`）:
+  平均曲線は滑らか、段差は順序依存のゆらぎ（std 最大 ±0.5）。sgm=0.1 は S≈65〜70 で確実に sgm=0 超え
+- 両スクリプトの実験選択に厳密フィルタ（seed_pos/seed_nf/rcut/v0/input_file）を追加
+  — フラット data/ での別実験混入（実例: NARMA seed=10 入力シムが sgm=0 に混入）を防止
 
 ### sgm_mean_state（task_06 v2）— 2026-06-20
 
@@ -117,6 +137,15 @@ python analysis/correlation_analysis/correlation_analysis.py \
 - rcut=13: C(Δt=1)=1.0, C(Δt=10)=1.0（完全連結・固定ネットワーク）
 - rcut が大きいほどネットワークが安定し C(Δt) の減衰が遅くなる傾向を確認
 - 詳細: `analysis/tasks/task_01_correlation_decay.md`
+
+### correlation_analysis（dt_max=2000, 訓練区間全体）— 2026-07-15
+
+- 出力: `analysis/correlation_analysis/20260715_192338/`、データ: `data/`（v0=0.5, sgm=0, ntime=140000 の 118 実験）
+- フレーム 2000–8000（訓練区間 6001 フレーム、n_base=4001）、dt_max=2000
+- `compute_correlation_decay` を FFT 相互相関に高速化（推定量は旧実装と同値、~86 s/実験）
+- 各 rcut とも Δt≈500 までにプラトーへ到達し、以後ほぼ一定（周期的な小振動あり）
+- プラトー値（Δt=2000, seed 平均）: rcut=1: 0.02 / rcut=4: 0.21 / rcut=7: 0.62 / rcut=9: 0.92 / rcut≥11: 1.00
+- rcut≤3 は長時間でほぼ完全にネットワークが再編される一方、rcut≥8 は初期構造の大部分が残存
 
 ### ridge_sweep（task_07）— 2026-06-19
 
