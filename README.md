@@ -7,9 +7,9 @@ Vicsek モデルのシミュレーションと、NARMA10 に対するリザバ�
 - `vicsek_dynamic.c`: Vicsek 粒子ダイナミクスを計算し、`data/YYYYMMDD_HHMMSS/`（`position.dat`, `params_model.json`）に保存します。
 - `generate_narma10.py`: シミュレーションと評価で使う入力データ・教師データを生成します。
 - `vicsek_rc/`: 共有ライブラリ（メトリクス・ローダ・評価・プロット）。解析スクリプトはここから import します（→ `vicsek_rc/README.md`）。
-- `analysis/`: 解析スクリプトとデータの対応表（→ `analysis/README.md`）、解析タスク表（→ `analysis/analysis_tasks.md`）。
+- `analysis/`: 解析スクリプトとデータの対応表（→ `analysis/README.md`）
   スイープ実行スクリプトも各解析サブディレクトリ内（`analysis/<解析名>/run_*.py`）に置きます。
-- `tasks/`: タスクごとの詳細記録（目標・手法・実行コマンド・結果・考察）。`task_01`〜（番号の一覧は `analysis/analysis_tasks.md`）。結果と考察の一次記録はここ。
+- 解析ごとの計画と実行記録はワークスペースの `../plan/`、分かったことは `../HYPOTHESES.md` にある（2026-10-07 に `tasks/` を廃止。それ以前の task の記録は git の履歴に残っている）。
 - `data/`: シミュレーション出力と実験カタログ（→ `data/README.md`）。
 - `for.sh`: データ生成、シミュレーション、評価までの標準ワークフローをまとめて実行します。
 

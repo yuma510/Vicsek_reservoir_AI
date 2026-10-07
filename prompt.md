@@ -31,7 +31,7 @@
 
 ## Phase 1 : シミュレーションと解析の実行
 
-**[analysis/analysis_tasks.md](analysis/analysis_tasks.md) を読み、`[ ]`（未完了）のタスクを順番に実行すること。**
+**ワークスペースの [../TODO.md](../TODO.md) の作業キュー（B 節）から作業を選び、`../plan/` に計画書を作ってから実行すること**（2026-10-07 に task 管理を廃止）。
 
 ### 共通ルール
 - analysis/<解析名>/<YYYYMMDD_HHMMSS>にデータを入れてください

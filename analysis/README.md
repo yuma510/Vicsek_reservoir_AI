@@ -77,6 +77,5 @@ python analysis/correlation_analysis/correlation_analysis.py \
 （`split_fixed_varied` / `write_params_used`）。詳細は `code_reference.md` の
 「vicsek_rc/params_io.py — 解析プロットのパラメータ記録」節を参照。
 
-タスク管理は `analysis_tasks.md` を参照。
 
-結果と考察は `../tasks/task_NN_*.md` に記録する（ラン単位の「実行結果メモ」は 2026-10-06 に廃止し、task にない記述は各 task の末尾に移した）。
+結果と考察は、ワークスペースの `plan/` の計画書（実行記録）と `HYPOTHESES.md` に記録する（2026-10-07 に `tasks/` を廃止）。
