@@ -4,16 +4,25 @@ Vicsek モデルのシミュレーションと、NARMA10 に対するリザバ�
 
 ## ファイル構成
 
-- `vicsek_dynamic.c`: Vicsek 粒子ダイナミクスを計算し、`data/YYYYMMDD_HHMMSS/`（`position.dat`, `params_model.json`, `README.md`）に保存します。
+- `vicsek_dynamic.c`: Vicsek 粒子ダイナミクスを計算し、`data/YYYYMMDD_HHMMSS/`（`position.dat`, `params_model.json`）に保存します。
 - `generate_narma10.py`: シミュレーションと評価で使う入力データ・教師データを生成します。
 - `vicsek_rc/`: 共有ライブラリ（メトリクス・ローダ・評価・プロット）。解析スクリプトはここから import します（→ `vicsek_rc/README.md`）。
-- `analysis/`: 解析スクリプトと解析タスク表（→ `analysis/README.md`, `analysis/analysis_tasks.md`）。
-- `runners/`: スイープ実行スクリプト（→ `runners/README.md`）。
+- `analysis/`: 解析スクリプトとデータの対応表（→ `analysis/README.md`）、解析タスク表（→ `analysis/analysis_tasks.md`）。
+  スイープ実行スクリプトも各解析サブディレクトリ内（`analysis/<解析名>/run_*.py`）に置きます。
+- `tasks/`: タスクごとの詳細記録（目標・手法・実行コマンド・結果・考察）。`task_01`〜（番号の一覧は `analysis/analysis_tasks.md`）。結果と考察の一次記録はここ。
 - `data/`: シミュレーション出力と実験カタログ（→ `data/README.md`）。
 - `for.sh`: データ生成、シミュレーション、評価までの標準ワークフローをまとめて実行します。
 
 ドキュメントはコードの近くに分散配置しています。横断的な文書はルート直下:
 `prompt.md`（研究ワークフロー）, `code_reference.md`（コード技術リファレンス）, `CLAUDE.md`（プロジェクトルール）。
+
+**workspace 全体の俯瞰**（このプロジェクトと派生プロジェクトの関係、研究の経過、仮説の検証状況、作業キュー）は
+[../README.md](../README.md) ／ [../PROGRESS.md](../PROGRESS.md) ／ [../HYPOTHESES.md](../HYPOTHESES.md) ／
+[../TODO.md](../TODO.md) を参照してください。
+
+**数式による定義**（更新式・NARMA10・MC・IPC・相関減衰の定義、研究の問いの数式表現、
+式と実装の食い違い）は [../DEFINITIONS.md](../DEFINITIONS.md) にあります。`code_reference.md` が
+「コードがどう書かれているか」を、`../DEFINITIONS.md` が「式でどう定義されているか」を担当します。
 
 ## クイックスタート
 

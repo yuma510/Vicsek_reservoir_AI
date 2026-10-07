@@ -1,6 +1,10 @@
 # コード詳細リファレンス
 
 > prompt.md の Phase 0 から切り出した技術詳細。コードを変更した場合はここも更新すること。
+>
+> **数式による定義は [../DEFINITIONS.md](../DEFINITIONS.md)。** この文書は「コードがどう書かれているか」
+> （CLI 引数・JSON キー・関数・I/O）を担当し、`../DEFINITIONS.md` が「式でどう定義されているか」と
+> 「式と実装の食い違い」を担当する。
 
 ---
 
@@ -81,8 +85,44 @@ analysis/<解析名>/<script>.py  ←  data/
   └─→ analysis/<解析名>/<YYYYMMDD_HHMMSS>/results_*.json  (キャッシュ、JSON)
 ```
 
+2026-07 以降に追加された解析スクリプト:
+
+- `analysis/sgm_sweep/run_sgm_sweep_perseed.py` — sgm 掃引。各 trial seed を**専用の NARMA 入力**で
+  駆動する（共通の seed666 駆動では sgm=0 に外れ値が出るため）。出力 dir は `<ts>_perseed`
+- `analysis/task13_readout/run_task13.py` — N=1 の粒子で遅延 0 の入力を復元（task_13）。
+  パラメータは `analysis/task13_readout/default_params.json` から読む
+- `analysis/theta_fluctuation/`（task_14、2026-10-02 追加）— 定数入力（ノイズのみ）と NARMA 入力
+  （入力＋ノイズ）で θ のゆらぎ D_θ・D_sin を σ に対して比べる。パラメータは同 dir の
+  `default_params.json` から読む（出力先 `data_dir` = `data_newK`）
+  - `make_constant_input.py` — 試行 b の NARMA 入力（seed b）の平均 ū_b を求め、定数入力
+    `narma_data/<ts>/const_input_mean-of-narma-s<b>_u<ū>.dat` を作る（名前に `seed<b>.dat` を含めず、
+    narma_seed フィルタに誤って拾われないようにしている）
+  - `run_sims.py` — 入力 × σ × 試行のシムを並列実行。seed は `seed_X = b + seed_offsets[X]`。
+    params_model.json が全キー一致し position.dat が完走しているものはスキップ（再開可能）。`--smoke` あり
+  - `theta_fluctuation.py` — 粒子ごとの時間方向 2 乗ずれ（θ は円周平均・折り返し、sinθ は分散）を
+    粒子群 all/locked/unlocked で平均して平方根。CSV: `fluct_data.csv` / `fluct_summary.csv` /
+    `locked_mask.csv` / `per_particle.csv`
+- `analysis/rcut_sweep/run_rcut_sweep.py`（task_04）— 2026-10-06 に `--eval-jobs N` を追加し、評価（phase2）を N 並列にした。
+  シムの選択規則（`find_exp_dir` の v0/sgm/ntime/narma_seed/seed_pos 照合）と、出力 dir 内の `results_<key>.json` キャッシュは従来どおり。
+  既定は 1（従来と同じ直列）
+- `analysis/rcut_utime_heatmap/rcut_utime_heatmap.py`（task_12。2026-10-06 改修）— rcut × utime 掃引（v0=0, sgm=0）。
+  `ntime = 14000 × utime` で出力フレーム数を固定。既存シムの判定は `<data_dir>/index.csv` を直接引く
+  （rcut, utime, seed_pos, v0, sgm で照合。input_file は見ないので、定数入力などの別実験が同じ dir にあると誤マッチしうる）
+  - 2026-10-06: 評価を `--eval-jobs` 並列に（I/O 律速）、`--skip-eval`（シムのみ）を追加、
+    rcut ごとの線グラフ `mc_vs_utime.png` / `nrmse_vs_utime.png` と集計 `metric_vs_utime.csv` を追加
+  - 並列シム中は index.csv への追記が競合するので、`--skip-eval` でシム → `python -m vicsek_rc.catalog --data-dir <dir>`
+    で再構築 → `--skip-sim` で評価、の順に実行する
+- `analysis/pred_mean/cache_predictions.py` / `pred_distribution.py`（task_15、2026-10-06 追加）— task_10 の予測平均で、
+  ノイズ実現ごとの予測の分布を見る。パラメータは `analysis/pred_mean/pred_distribution_params.json`
+  - `cache_predictions.py` — `pred_mean.build_index` / `realization_predictions` で各実現の予測を計算し、NARMA 予測と
+    指定した遅延 k の入力予測を `tmp/pred_dist_cache/sgm<σ>_seed<seed>.npz`（float32）に保存。σ=0 は 1 実現のみ。
+    既存キャッシュはスキップ（再開可能）。`--smoke` で task_10 の 07-25 再評価と NRMSE・MC を照合
+  - `pred_distribution.py` — キャッシュだけを読み、図 A（時系列）・図 B（ヒストグラム・Q-Q）と
+    `timeseries_window.csv` / `hist_samples.csv` / `dist_summary.csv` / `mean_vs_target.csv` を出力
+  - 注意: n_eval は `min(シム長, NARMA 長)` で決まり、現在は 14000（seed666 の最新 NARMA が 22000 点のため）
+
 プロット元データは CSV（long 形式）で保存する（サマリー JSON は廃止）。パラメータ/メタデータは JSON のまま。
-詳細は CLAUDE.md §3 を参照。各スクリプトの CSV: `rcut_sweep_data.csv` / `sgm_sweep_data.csv` /
+根拠は CLAUDE.md の「プロットの元データは CSV で保存する」ルール。各スクリプトの CSV: `rcut_sweep_data.csv` / `sgm_sweep_data.csv` /
 `noise_avg_data.csv` / `MCk.csv` / `narma10_prediction.csv` / `NARMA10_avg.csv` / `MCk_vs_delay.csv` /
 `summary.csv` / `summary_all.csv` / `correlation_<tag>.csv` / `analysis_summary.csv`。
 
@@ -116,7 +156,7 @@ u(t) ~ Uniform(low, high)
 |---|---|
 | `narma10_input_<low>:<high>_seed<seed>.dat` | 入力信号 u |
 | `narma10_target_<low>:<high>_seed<seed>.dat` | 正解信号 y |
-| `narma10_params_<low>:<high>_seed<seed>.json` | 使用パラメータ（`length` / `seed` / `low` / `high` / `input_file` / `target_file`）。再現用メタデータ（CLAUDE.md §5、`vicsek_rc.save_narma_params`） |
+| `narma10_params_<low>:<high>_seed<seed>.json` | 使用パラメータ（`length` / `seed` / `low` / `high` / `input_file` / `target_file`）。再現用メタデータ（`vicsek_rc.save_narma_params`） |
 
 読込側（sgm・rcut・ridge・correlation・reservoir_aggregate 等の解析スクリプト）は
 `--input-path`/`--target-path` 未指定時に `vicsek_rc.find_narma_by_seed` で
@@ -138,13 +178,13 @@ u(t) ~ Uniform(low, high)
 ```
 x_m  += h1 · v0 · cos(θ_m)
 y_m  += h1 · v0 · sin(θ_m)
-θ_m  += h1·nf[m] + h1·(K/N)·ft[m] + h1·F·sin(c·v[t] - θ_m) + sqrt(h1)·sgm·ξ
+θ_m  += h1·nf[m] + h1·K·ft[m] + h1·F·sin(c·v[t] - θ_m) + sqrt(h1)·sgm·ξ
 ```
 
 | 変数 | 意味 |
 |---|---|
-| `nf[m]` | 自然振動数: `2π·(N(0,1)+1)` |
-| `ft[m]` | 平均場力: `mean(sin(θ_j - θ_m))` (cutoff 内) |
+| `nf[m]` | 自然振動数: `2π·(nf_sigma·N(0,1)+nf_mean)`（既定 `nf_mean=1.0`, `nf_sigma=1.0` = 従来の `2π·(N(0,1)+1)`。`nf_sigma=0` で全粒子が同じ自然振動数） |
+| `ft[m]` | 局所平均場力: `mean(sin(θ_j - θ_m))`（cutoff 内の近傍で平均 = `(1/n_i)Σ`）。**結合項は `h1·K·ft`**（旧版は `h1·(K/N)·ft` で誤って 1/N 倍弱かった。2026-10-02 に N 除算を削除し研究ノートの式 `(K/n_i)Σsin` と一致させた）。近傍判定 `compute_interactions` は全ペアを1回ずつ最小イメージ(PBC)距離で数える（2026-10-02 に旧セルリスト実装の二重カウント＋生距離不整合を修正。rcut>boxsize/2 で v0=0/v0=0.5 が厳密一致することを確認）。**2026-10-06**: `M=floor(boxsize/rcut)≥3` のときは正しいセルリスト（半殻法、距離は常に最小イメージ）`compute_interactions_cell` を使い、それ以外は全ペア版 `compute_interactions_allpairs`。全ペア版と出力が一致することを rcut=1, 2, 13・v0=0, 0.5・N=2000 で確認。隣接行列 `A` は `write_adjacency=1` のときだけ確保・更新する |
 | `K` | 相互作用結合強度 |
 | `F` | 入力強制振幅 |
 | `c` | 入力位相スケール |
@@ -163,6 +203,8 @@ y_m  += h1 · v0 · sin(θ_m)
 | `F` | 14.3 | 入力強制振幅 |
 | `c` | 0.1 | 入力位相スケール |
 | `sgm` | 0.0 | ノイズ振幅 |
+| `nf_mean` | 1.0 | 自然振動数の平均係数（`nf[i] = 2π(nf_sigma·N(0,1) + nf_mean)`）。**2026-07-31 追加**（task_13）。既定 1.0 で従来と同一挙動。上げると粒子の自転が速くなり入力の保持が壊れる |
+| `nf_sigma` | 1.0 | 自然振動数のばらつき係数。**2026-10-06 追加**（論文のセットアップ＝全粒子で同じ ω を再現するため）。既定 1.0 で従来と同一挙動（乱数は常に引くので他の乱数列は変わらない）。`params_model.json` と `index.csv` に記録 |
 | `utime` | 10 | 入力1点あたりのステップ数 |
 | `ntime` | 120000 | 総ステップ数（= 12000 × utime） |
 | `rcut` | 1.0 | 相互作用カットオフ（単一値、CLI で指定） |
@@ -176,7 +218,7 @@ y_m  += h1 · v0 · sin(θ_m)
 | インスタンス | JSON キー | デフォルト | 用途 | 備考 |
 |---|---|---|---|---|
 | `rng_pos` | `seed_pos` | 13 | 初期位置 (x, y, θ) | sgm=0 でも必ず有効 |
-| `rng_nf` | `seed_nf` | 16 | 自然振動数 `nf[i]` | sgm=0 でも必ず有効 |
+| `rng_nf` | `seed_nf` | 16 | 自然振動数 `nf[i] = 2π(N(0,1) + nf_mean)` | sgm=0 でも必ず有効。`nf_mean` は平均のシフトのみで、乱数ストリームは変えない |
 | `rng_noise` | `seed_noise` | 12 | シミュレーション中のノイズ `ξ` | **sgm=0.0 のとき動力学に影響しない** |
 
 3インスタンスはすべて異なる整数で初期化されるため独立したストリームになる。
@@ -215,6 +257,7 @@ JSON フォーマット（`configs/default_params.json` 参照 / `params_model.j
   "c": 0.1,
   "rcut": 13.0,
   "rho": 2.0,
+  "nf_mean": 1.0,
   "seed_noise": 12,
   "seed_pos": 13,
   "seed_nf": 16,
@@ -233,6 +276,7 @@ JSON フォーマット（`configs/default_params.json` 参照 / `params_model.j
   "ntime": 120000,
   "utime": 10,
   ...
+  "nf_mean": 1.000000,
   "seed_noise": 12,
   "seed_pos": 13,
   "seed_nf": 16,
@@ -247,7 +291,7 @@ JSON フォーマット（`configs/default_params.json` 参照 / `params_model.j
 
 **`position.dat`** — `x y theta` の3列テキスト。utime ステップごとに 1 フレーム（各入力期間の末尾ステップ）を N 行出力。合計 N×(ntime/utime) 行（デフォルト: N×12000 = 6,000,000 行）。
 
-**`params_model.json`** — 上記パラメータ + seed + `write_adjacency` + `input_file`（使用した NARMA 入力ファイルのパス）をすべて記録。`input_file` により position.dat の再現に必要な入力シーケンスが自明になる。
+**`params_model.json`** — 上記パラメータ（`nf_mean` を含む）+ seed + `write_adjacency` + `input_file`（使用した NARMA 入力ファイルのパス）をすべて記録。`input_file` により position.dat の再現に必要な入力シーケンスが自明になる。
 
 **`adjacency/adjacency_<frame>.dat`** — `write_adjacency=1` のときのみ生成。N×N の 0/1 行列（スペース区切り、対称行列）。`frame` は 0 始まりの utime フレームインデックス（6 桁ゼロ埋め）。1 ファイルあたり約 500 KB（N=500 時）。
 
@@ -315,7 +359,7 @@ find_exp_dir(data_dir, *, rcut=None, sgm=None,
 
 ## vicsek_rc/catalog.py — データカタログ `index.csv`
 
-`data/` はフラットに多数のタイムスタンプ dir を並べる（CLAUDE.md §4.1）。目視で見通せないため、
+`data/` はフラットに多数のタイムスタンプ dir を並べる（方針は `data/README.md` 参照）。目視で見通せないため、
 全 dir の `params_model.json` を 1 表にまとめた `data/index.csv` を生成する。
 
 | 関数 | 説明 |
@@ -329,7 +373,10 @@ find_exp_dir(data_dir, *, rcut=None, sgm=None,
   （`model,N,boxsize,ntime,utime,h1,v0,sgm,K,F,c,rcut,rho`）+ seed（新: `seed_pos/seed_noise/seed_nf`、
   旧: `seed` を連結文字列）+ `write_adjacency,input_file`（任意）。
 - CLI: `python -m vicsek_rc.catalog [--data-dir data] [--out ...]`。スイープ後に再生成する（手動運用）。
-- 書き出しは pandas `to_csv(index=False)`（CLAUDE.md §5.2 の CSV 方針に合致）。
+- `SCALAR_COLS` に `nf_mean`, `nf_sigma`, `n_driver` を含む（2026-10-07 追加。記録のない旧シムは NaN）。
+  ⚠ `params_io.split_fixed_varied` は「キーが欠けている dict は varied 扱い」とするので、新旧のシムを混ぜて
+  `params_used.json` を書くと、`swept: {nf_sigma: [...]}` のような偽の掃引軸が現れることがある
+- 書き出しは pandas `to_csv(index=False)`（CLAUDE.md の CSV 保存ルールに合致）。
 
 ---
 
@@ -363,7 +410,14 @@ find_exp_dir(data_dir, *, rcut=None, sgm=None,
 | `write_params_used(output_dir, model_param_dicts, reservoir_fixed, reservoir_swept=None)` | モデル param dict 群・レザバー param | `params_used.json` のパス | model は `split_fixed_varied` で自動分離、reservoir は呼び出し側が fixed/swept を明示して書き出す |
 
 各 sweep スクリプト（`run_rcut_sweep.py` / `run_sgm_sweep.py` / `sgm_mean_state.py` / `run_ridge_sweep.py`）は
-出力 dir に `params_used.json` を保存する（CLAUDE.md §3）。掃引軸（rcut/sgm/seed/λ/train_num/S 等）は
+出力 dir に `params_used.json` を保存する（CLAUDE.md の記録ルール）。
+
+⚠ **例外（未修正）**: `run_sgm_sweep_perseed.py` は `write_params_used()` を呼んでいないため、
+出力 dir に `params_used.json` が残らない（実例: `analysis/sgm_sweep/20260904_120017_perseed_9seed/`）。
+また `run_rcut_sweep.py` は起動引数（`--v0` 等）と実際に選択された sim dir を記録していないため、
+「どの条件で回したか」「どのシムを使ったか」が後から復元できない。
+→ `../TODO.md` C-3 / C-8
+掃引軸（rcut/sgm/seed/λ/train_num/S 等）は
 固定値と区別して**範囲（値リスト）でコンパクトに**記録され、全 sim の丸ごとダンプはしない。
 
 ```json

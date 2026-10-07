@@ -21,3 +21,8 @@ __pycache__/
 Thumbs.db
 *.swp
 *.swo
+
+# 2026-10-02 の結合修正以降のシミュレーションデータ（大容量）
+data_newK/
+# 1 階層深い解析出力（例: analysis/higher_order_readout/pairseed_*/<ts>/）
+analysis/*/*/[0-9]*/

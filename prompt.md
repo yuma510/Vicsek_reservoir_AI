@@ -22,7 +22,7 @@
 
 ## データと評価タスク
 
-- 入力・正解データ: `tmp/` ディレクトリ
+- 入力・正解データ: `narma_data/<YYYYMMDD_HHMMSS>/`（`vicsek_rc.find_narma_by_seed` で seed から解決する）
 - **NARMA10**: 指標は NRMSE（`sqrt(MSE/mean(y²))`）と NRMSE2（`MSE/Var(y)`）
 - **Memory Capacity**: `MC = Σ MC_k`、`MC_k = corr(u(t-k), ŷ)²`、`MC_k < N/(train-washout)` で打ち切り
 
