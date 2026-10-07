@@ -32,11 +32,8 @@
     2,
     3
   ],
-  "seed_offsets": {
-    "seed_noise": 2,
-    "seed_pos": 3,
-    "seed_nf": 6
-  },
+  "seed_scheme": "legacy",
+  "_seed_note": "この実験は 2026-10-06 以前の規則（b+2, b+3, b+6）で行った。新しい実験は seed_scheme を省くか random64 にする（configs/seed_policy.json）",
   "steady_frac": 0.5,
   "n_jobs": 24,
   "min_free_gb": 20,

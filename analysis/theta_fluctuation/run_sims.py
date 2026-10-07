@@ -1,7 +1,7 @@
 """θ ゆらぎ比較（task_14）のシミュレーション実行。
 
 条件 = 入力（const: 定数 ū_b ／ narma: NARMA seed b）× sgm × 試行 b。
-seed は試行 b から `seed_X = b + seed_offsets[X]` で決める（条件間で共通、試行間ですべて変化）。
+seed は試行 b から `vicsek_rc.seeds.trial_seeds(b, seed_scheme)` で決める（条件間で共通、試行間ですべて変化）。
 
 既に同じ条件のシム（params_model.json が全キー一致）がある場合はスキップする（再開可能）。
 `--smoke` で default_params.json の smoke 設定（短い ntime、別の出力先）を使う。
@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from vicsek_rc import find_narma_by_seed
+from vicsek_rc.seeds import trial_seeds as seeds_for
 from make_constant_input import find_const_inputs
 
 BINARY = str(ROOT / "vicsek_dynamic")
@@ -48,8 +49,7 @@ def build_config(P, mode, sgm, b, inputs, output_base, ntime) -> dict:
     cfg = dict(P["model"])
     cfg["ntime"] = int(ntime)
     cfg["sgm"] = float(sgm)
-    for key, off in P["seed_offsets"].items():
-        cfg[key] = int(b + off)
+    cfg.update(seeds_for(b, P.get("seed_scheme")))   # configs/seed_policy.json の規則（JSON で legacy も指定可）
     cfg["input_file"] = inputs[(mode, b)]
     cfg["output_base"] = str(output_base)
     return cfg

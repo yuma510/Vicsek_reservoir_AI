@@ -28,6 +28,7 @@ import pandas as pd
 
 from vicsek_rc import apply_style, load_reservoir_defaults, load_theta, write_params_used
 from run_sims import build_config, find_existing, input_files
+from vicsek_rc.seeds import trial_seeds as seeds_for
 
 PARAMS_PATH = Path(__file__).parent / "default_params.json"
 # dataviz リファレンスパレットの categorical slot 1, 2
@@ -127,7 +128,7 @@ def main():
     # ── D の計算（群ごとに 2 乗ずれを平均してから平方根） ─────────────────────
     rows = []
     u_const = {b: float(np.loadtxt(inputs[("const", b)], max_rows=1)) for b in trials}
-    seeds = {b: {k: b + o for k, o in P["seed_offsets"].items()} for b in trials}
+    seeds = {b: seeds_for(b, P.get("seed_scheme")) for b in trials}
     groups = {"all": lambda df: df, "locked": lambda df: df[df.locked], "unlocked": lambda df: df[~df.locked]}
     for (m, s, b, w), g in pp.groupby(["input_mode", "sgm", "trial_seed", "window"]):
         for gname, sel in groups.items():

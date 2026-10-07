@@ -110,6 +110,8 @@ analysis/<解析名>/<script>.py  ←  data/
   （rcut, utime, seed_pos, v0, sgm で照合。input_file は見ないので、定数入力などの別実験が同じ dir にあると誤マッチしうる）
   - 2026-10-06: 評価を `--eval-jobs` 並列に（I/O 律速）、`--skip-eval`（シムのみ）を追加、
     rcut ごとの線グラフ `mc_vs_utime.png` / `nrmse_vs_utime.png` と集計 `metric_vs_utime.csv` を追加
+  - 2026-10-07: 試行ごとの値を点で描く `mc_vs_utime_scatter.png` / `nrmse_vs_utime_scatter.png` を追加。
+    `--replot <出力dir>` で既存の `heatmap_data.csv` からヒートマップ・線グラフ・散布図を描き直せる（評価はやり直さない）
   - 並列シム中は index.csv への追記が競合するので、`--skip-eval` でシム → `python -m vicsek_rc.catalog --data-dir <dir>`
     で再構築 → `--skip-sim` で評価、の順に実行する
 - `analysis/pred_mean/cache_predictions.py` / `pred_distribution.py`（task_15、2026-10-06 追加）— task_10 の予測平均で、
@@ -225,7 +227,20 @@ y_m  += h1 · v0 · sin(θ_m)
 
 ### シード設計・スイープルール
 
-rcut/sgm スイープで trial 間のエラーバーをとるときは `seed_noise/pos/nf` をすべて変化させる。スクリプトでは trial seed（base）を `b` として `seed_noise=b+2, seed_pos=b+3, seed_nf=b+6` で設定する。
+rcut/sgm スイープで trial 間のエラーバーをとるときは `seed_noise/pos/nf` をすべて変化させる。試行番号 `b` から 3 つの seed を
+`vicsek_rc.seeds.trial_seeds(b)` で決める（規則は `configs/seed_policy.json`、2026-10-07 制定）。
+
+| 規則 | 決め方 | 使いどころ |
+|---|---|---|
+| `random64`（既定） | `numpy.random.SeedSequence(entropy=master_entropy, spawn_key=(b,))` から 63 ビットの値を 3 つ。b が同じなら毎回同じ | 2026-10-07 以降の新しい実験 |
+| `legacy` | `seed_noise=b+2, seed_pos=b+3, seed_nf=b+6` | 2026-10-06 以前のデータの再評価。試行 b の seed_pos と試行 b+1 の seed_noise が同じ値になる（同じ乱数列を別の用途で使う）ので、新しい実験には使わない |
+
+- 掃引スクリプト（rcut_sweep, sgm_sweep, sgm_sweep_perseed, rcut_utime_heatmap, ridge_sweep）は `--seed-scheme {random64,legacy}` で選ぶ。
+  theta_fluctuation と no_input_transition は JSON の `seed_scheme`（既存の実験の JSON には `legacy` と明記）
+- NARMA 入力の seed（= b）は別の乱数生成器なので対象外
+- seed を意図して固定する特別なセットアップ（task_10 のノイズ平均：seed_pos=13, seed_nf=16 固定、seed_noise を掃引）は対象外
+- `master_entropy` は変えないこと（変えると全試行の seed が変わる）。重なりの検査は `vicsek_rc.seeds.check_unique`
+
 
 - rcut スイープ（sgm=0 固定）: `seed_noise` は動力学に影響しないが、`seed_pos`・`seed_nf` が試行間で結果を変える。
 - sgm スイープ（sgm>0）: ノイズを含む 3 つの seed すべてが変わる。

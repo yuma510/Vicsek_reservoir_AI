@@ -16,8 +16,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from vicsek_rc import (evaluate_reservoir, find_exp_dir, write_params_used, load_reservoir_defaults,
+from vicsek_rc import (evaluate_reservoir, find_exp_dir, set_seed_scheme, write_params_used, load_reservoir_defaults,
                        new_narma_dir, iter_narma_dirs, save_narma_params)
+from vicsek_rc.seeds import trial_seeds as seeds_for   # 試行 b → seed（引数名 trial_seeds との衝突を避ける）
 from generate_narma10 import generate_narma10 as _narma10_gen
 
 BINARY = str(ROOT / "vicsek_dynamic")
@@ -39,7 +40,7 @@ def collect_model_params(rcut_values, trial_seeds, data_dir, v0=0.5):
     for rcut in rcut_values:
         for seed in trial_seeds:
             exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=0.0, v0=v0, ntime=140000, narma_seed=seed,
-                                   seed=seed+3, seed_key="seed_pos")
+                                   seed=seeds_for(seed)["seed_pos"], seed_key="seed_pos")
             if exp_dir is None:
                 exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=0.0, v0=v0, ntime=140000, narma_seed=seed,
                                        seed=seed, seed_index=0)
@@ -102,9 +103,9 @@ def _run_one_sim(args):
         "rcut":        float(rcut),
         "sgm":         0.0,
         "v0":          float(v0),
-        "seed_noise":  seed + 2,
-        "seed_pos":    seed + 3,
-        "seed_nf":     seed + 6,
+        "seed_noise":  seeds_for(seed)["seed_noise"],
+        "seed_pos":    seeds_for(seed)["seed_pos"],
+        "seed_nf":     seeds_for(seed)["seed_nf"],
         "ntime":       140000,
     }
     fd, cfg_path = tempfile.mkstemp(suffix=".json")
@@ -176,7 +177,7 @@ def phase2_evaluate(rcut_values, trial_seeds, narma_paths, data_dir, output_dir,
             # v0/sgm/ntime でフィルタしないと、フラットな data/ の別実験
             # （例: rcut_utime_heatmap の v0=0/ntime≠140000）を誤って拾う
             exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=0.0, v0=v0, ntime=140000, narma_seed=seed,
-                                   seed=seed+3, seed_key="seed_pos")
+                                   seed=seeds_for(seed)["seed_pos"], seed_key="seed_pos")
             if exp_dir is None:
                 exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=0.0, v0=v0, ntime=140000, narma_seed=seed,
                                        seed=seed, seed_index=0)
@@ -319,6 +320,8 @@ def parse_args():
                    help="skip simulation phase, only evaluate existing data")
     p.add_argument("--eval-jobs", type=int, default=1,
                    help="評価の並列数（position.dat の読み込みが律速）")
+    p.add_argument("--seed-scheme", choices=["random64", "legacy"], default=None,
+                   help="試行の seed の規則（configs/seed_policy.json）。既定は random64。既存データの再評価は legacy")
     p.add_argument("--v0", type=float, default=0.5,
                    help="particle speed (default: 0.5; use 0.0 for static network)")
     return p.parse_args()
@@ -326,6 +329,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    set_seed_scheme(args.seed_scheme)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) / ts
     output_dir.mkdir(parents=True, exist_ok=True)

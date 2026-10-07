@@ -17,18 +17,48 @@
     "rcut": 13.0,
     "nf_mean": 1.0
   },
-  "input_modes": ["const", "narma"],
-  "sgm_values": [0.0, 0.01, 0.03, 0.1, 0.2, 0.3, 0.4, 0.5],
-  "trial_seeds": [1, 2, 3],
-  "seed_offsets": {"seed_noise": 2, "seed_pos": 3, "seed_nf": 6},
-  "lock_threshold": 1e-3,
+  "input_modes": [
+    "const",
+    "narma"
+  ],
+  "sgm_values": [
+    0.0,
+    0.01,
+    0.03,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "trial_seeds": [
+    1,
+    2,
+    3
+  ],
+  "seed_scheme": "legacy",
+  "_seed_note": "この実験は 2026-10-06 以前の規則（b+2, b+3, b+6）で行った。新しい実験は seed_scheme を省くか random64 にする（configs/seed_policy.json）",
+  "lock_threshold": 0.001,
   "n_jobs": 6,
   "min_free_gb": 20,
   "cache_dir": "tmp/theta_fluctuation_cache",
   "smoke": {
     "ntime": 40000,
     "output_base": "tmp/theta_fluctuation_smoke",
-    "runs": [["const", 0.0], ["const", 0.1], ["narma", 0.0]],
+    "runs": [
+      [
+        "const",
+        0.0
+      ],
+      [
+        "const",
+        0.1
+      ],
+      [
+        "narma",
+        0.0
+      ]
+    ],
     "trial_seed": 1
   }
 }

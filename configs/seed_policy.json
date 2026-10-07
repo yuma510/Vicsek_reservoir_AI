@@ -1,0 +1,6 @@
+{
+  "scheme": "random64",
+  "master_entropy": 161326124159288385982752650691761284260,
+  "legacy_offsets": {"seed_noise": 2, "seed_pos": 3, "seed_nf": 6},
+  "_note": "2026-10-07 制定。random64: 試行番号 b から numpy.random.SeedSequence(entropy=master_entropy, spawn_key=(b,)) で 63 ビットの seed を 3 つ（seed_noise, seed_pos, seed_nf）作る。b が同じなら毎回同じ値になる。legacy: 2026-10-06 以前の規則 seed_X = b + legacy_offsets[X]（既存データの再評価用）。master_entropy は変えないこと（変えると全試行の seed が変わる）"
+}

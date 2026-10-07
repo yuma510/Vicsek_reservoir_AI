@@ -2,7 +2,7 @@
 
 条件 = K × Ω × 試行 b。他のパラメータは default_params.json の "base"（段階 1 は論文のセットアップ）。
 Ω（= ω/D_r）から自然周波数の平均を nf_mean = Ω·D_r/(2π)、D_r = sgm²/2 で決める。
-seed は試行 b から `seed_X = b + seed_offsets[X]`。
+seed は試行 b から `vicsek_rc.seeds.trial_seeds(b, seed_scheme)` で決める（seed_scheme は JSON。既定は configs/seed_policy.json）。
 
 既に同じ条件のシム（params_model.json が全キー一致）がある場合はスキップする（再開可能）。
 `--smoke` で smoke 設定（短い ntime、別の出力先）を使う。`--params` で段階 2 の別 JSON を指定できる。
@@ -31,6 +31,8 @@ _tf = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_tf)
 find_existing = _tf.find_existing
 
+from vicsek_rc.seeds import trial_seeds as seeds_for
+
 BINARY = str(ROOT / "vicsek_dynamic")
 PARAMS_PATH = Path(__file__).parent / "default_params.json"
 
@@ -41,8 +43,7 @@ def build_config(P, K, Omega, b, output_base, ntime) -> dict:
     cfg["K"] = float(K)
     D_r = cfg["sgm"] ** 2 / 2.0
     cfg["nf_mean"] = round(float(Omega) * D_r / (2.0 * math.pi), 8)
-    for key, off in P["seed_offsets"].items():
-        cfg[key] = int(b + off)
+    cfg.update(seeds_for(b, P.get("seed_scheme")))   # configs/seed_policy.json の規則（JSON で legacy も指定可）
     cfg["input_file"] = str((ROOT / P["input_file"]).resolve())
     cfg["output_base"] = str(output_base)
     return cfg

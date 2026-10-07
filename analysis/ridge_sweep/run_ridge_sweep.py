@@ -36,6 +36,7 @@ from vicsek_rc import (
     ridge_gram_decomp, ridge_solve_gram,
     new_narma_dir, iter_narma_dirs, save_narma_params,
 )
+from vicsek_rc.seeds import trial_seeds as seeds_for, set_seed_scheme  # 試行 b → seed（seed_policy.json）
 from generate_narma10 import generate_narma10 as _narma10_gen
 
 BINARY = str(ROOT / "vicsek_dynamic")
@@ -98,9 +99,9 @@ def _run_one_sim(args):
         "rcut":        RCUT,
         "sgm":         SGM,
         "ntime":       NTIME,
-        "seed_noise":  seed + 2,
-        "seed_pos":    seed + 3,
-        "seed_nf":     seed + 6,
+        "seed_noise":  seeds_for(seed)["seed_noise"],
+        "seed_pos":    seeds_for(seed)["seed_pos"],
+        "seed_nf":     seeds_for(seed)["seed_nf"],
     }
     fd, cfg_path = tempfile.mkstemp(suffix=".json")
     try:
@@ -143,7 +144,7 @@ def _eval_one_seed(seed, data_group_dir, narma_paths, output_dir):
             return json.load(f)
 
     # 実験ディレクトリを検索（新形式 → 旧形式フォールバック）
-    exp_dir = find_exp_dir(data_group_dir, rcut=RCUT, seed=seed+3, seed_key="seed_pos")
+    exp_dir = find_exp_dir(data_group_dir, rcut=RCUT, seed=seeds_for(seed)["seed_pos"], seed_key="seed_pos")
     if exp_dir is None:
         exp_dir = find_exp_dir(data_group_dir, rcut=RCUT, seed=seed, seed_index=0)
     if exp_dir is None:
@@ -352,6 +353,8 @@ def parse_args():
     p = argparse.ArgumentParser(description="λ × train_num 2D sweep for ridge regression")
     p.add_argument("--seeds",      nargs="+", type=int, default=SEEDS)
     p.add_argument("--rcut",       type=float, default=RCUT)
+    p.add_argument("--seed-scheme", choices=["random64", "legacy"], default=None,
+                   help="試行の seed の規則（configs/seed_policy.json）。既定は random64。既存データの再評価は legacy")
     p.add_argument("--n-jobs",     type=int, default=4)
     p.add_argument("--data-dir",   default="data")
     p.add_argument("--narma-dir",  default="narma_data")
@@ -363,6 +366,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    set_seed_scheme(args.seed_scheme)
     ts         = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) / ts
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -408,7 +412,7 @@ def main():
     # params_used.json
     params_list = []
     for seed in valid_seeds:
-        exp_dir = find_exp_dir(data_group_dir, rcut=args.rcut, seed=seed+3, seed_key="seed_pos")
+        exp_dir = find_exp_dir(data_group_dir, rcut=args.rcut, seed=seeds_for(seed)["seed_pos"], seed_key="seed_pos")
         if exp_dir is None:
             exp_dir = find_exp_dir(data_group_dir, rcut=args.rcut, seed=seed, seed_index=0)
         if exp_dir and (exp_dir / "params_model.json").exists():

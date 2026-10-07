@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from vicsek_rc.seeds import trial_seeds as seeds_for, set_seed_scheme  # 試行 b → seed（seed_policy.json）
 from vicsek_rc import (evaluate_reservoir, find_exp_dir, write_params_used, load_reservoir_defaults,
                        find_narma_by_seed)
 
@@ -38,7 +39,7 @@ def collect_model_params(sgm_values, seeds, rcut, data_dir, v0=None, narma_seed=
     params_list = []
     for sgm in sgm_values:
         for seed in seeds:
-            exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed+3,
+            exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seeds_for(seed)["seed_pos"],
                                    seed_key="seed_pos", v0=v0, ntime=140000, narma_seed=narma_seed)
             if exp_dir is None:
                 exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed,
@@ -62,9 +63,9 @@ def _run_one_sim(args):
         "output_base": str(data_dir),
         "rcut":        float(rcut),
         "sgm":         float(sgm),
-        "seed_noise":  seed + 2,
-        "seed_pos":    seed + 3,
-        "seed_nf":     seed + 6,
+        "seed_noise":  seeds_for(seed)["seed_noise"],
+        "seed_pos":    seeds_for(seed)["seed_pos"],
+        "seed_nf":     seeds_for(seed)["seed_nf"],
         "ntime":       140000,
     }
     if v0 is not None:
@@ -91,9 +92,9 @@ def phase1_simulate(sgm_values, seeds, rcut, input_path, data_dir, n_jobs, v0=No
     jobs = []
     for s in sgm_values:
         for sd in seeds:
-            if find_exp_dir(data_dir, rcut=rcut, sgm=s, seed=sd+3,
+            if find_exp_dir(data_dir, rcut=rcut, sgm=s, seed=seeds_for(sd)["seed_pos"],
                             seed_key="seed_pos", v0=v0, ntime=140000, narma_seed=narma_seed) is not None:
-                print(f"[SKIP SIM] sgm={s} seed_pos={sd+3} (already exists)", flush=True)
+                print(f"[SKIP SIM] sgm={s} seed_pos={seeds_for(sd)["seed_pos"]} (already exists)", flush=True)
                 continue
             jobs.append((s, sd, rcut, input_path, data_dir, v0))
     print(f"Phase 1: launching {len(jobs)} simulations (n_jobs={n_jobs}) …", flush=True)
@@ -130,7 +131,7 @@ def phase2_evaluate(sgm_values, seeds, rcut, data_dir, output_dir,
                     results[key] = json.load(f)
                 continue
 
-            exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed+3,
+            exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seeds_for(seed)["seed_pos"],
                                    seed_key="seed_pos", v0=v0, ntime=140000, narma_seed=narma_seed)
             if exp_dir is None:
                 exp_dir = find_exp_dir(data_dir, rcut=rcut, sgm=sgm, seed=seed,
@@ -261,6 +262,8 @@ def parse_args():
     p.add_argument("--seeds", nargs="+", type=int,
                    default=[10, 11, 12, 13, 14],
                    metavar="SD", help="noise seeds (seed_array[2])")
+    p.add_argument("--seed-scheme", choices=["random64", "legacy"], default=None,
+                   help="試行の seed の規則（configs/seed_policy.json）。既定は random64。既存データの再評価は legacy")
     p.add_argument("--n-jobs", type=int, default=4,
                    help="parallel simulation workers")
     p.add_argument("--data-dir", default="data",
@@ -293,6 +296,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    set_seed_scheme(args.seed_scheme)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) / ts
     output_dir.mkdir(parents=True, exist_ok=True)

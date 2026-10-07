@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "analysis/sgm_sweep"))
 import numpy as np
 import pandas as pd
 
+from vicsek_rc.seeds import trial_seeds as seeds_for, set_seed_scheme  # 試行 b → seed（seed_policy.json）
 from vicsek_rc import (evaluate_reservoir, find_exp_dir, find_narma_by_seed,
                        load_reservoir_defaults, write_params_used)
 from vicsek_rc.catalog import write_catalog
@@ -46,7 +47,7 @@ for s in TRIALS:
 def _run_one(args):
     sgm, s = args
     cfg = {"input_file": NARMA[s][0], "output_base": str(DATA), "rcut": RCUT, "v0": V0,
-           "sgm": float(sgm), "seed_noise": s + 2, "seed_pos": s + 3, "seed_nf": s + 6,
+           "sgm": float(sgm), **seeds_for(s),
            "ntime": NTIME}
     fd, p = tempfile.mkstemp(suffix=".json")
     try:
@@ -64,9 +65,12 @@ def main():
     p = argparse.ArgumentParser(description="per-seed sgm sweep")
     p.add_argument("--v0", type=float, default=0.5)
     p.add_argument("--trials", nargs="+", type=int, default=[1, 2, 3, 5, 6, 7, 8, 9, 10])
+    p.add_argument("--seed-scheme", choices=["random64", "legacy"], default=None,
+                   help="試行の seed の規則（configs/seed_policy.json）。既定は random64。既存データの再評価は legacy")
     p.add_argument("--n-jobs", type=int, default=N_JOBS)
     p.add_argument("--data-dir", default=None, help="データ dir（既定 data。修正後は data_newK 等）")
     args = p.parse_args()
+    set_seed_scheme(args.seed_scheme)
     V0 = args.v0
     TRIALS = args.trials
     N_JOBS = args.n_jobs
@@ -87,7 +91,7 @@ def main():
     for sgm in SGM_VALS:
         for s in TRIALS:
             d = find_exp_dir(DATA, rcut=RCUT, sgm=sgm, v0=V0, ntime=NTIME,
-                             narma_seed=s, seed=s + 3, seed_key="seed_pos")
+                             narma_seed=s, seed=seeds_for(s)["seed_pos"], seed_key="seed_pos")
             ok = d is not None and (json.load(open(d / "params_model.json")).get("input_file", "") or "").endswith(f"seed{s}.dat")
             if not ok:
                 jobs.append((sgm, s))
@@ -115,7 +119,7 @@ def main():
     for sgm in SGM_VALS:
         for s in TRIALS:
             d = find_exp_dir(DATA, rcut=RCUT, sgm=sgm, v0=V0, ntime=NTIME,
-                             narma_seed=s, seed=s + 3, seed_key="seed_pos")
+                             narma_seed=s, seed=seeds_for(s)["seed_pos"], seed_key="seed_pos")
             if d is None:
                 print(f"[MISS] sgm={sgm} seed={s}", flush=True); continue
             params = json.load(open(d / "params_model.json"))

@@ -14,6 +14,7 @@ from .evaluate import (ridge_predict, ridge_gram_decomp, ridge_solve_gram,
 from .params_io import split_fixed_varied, write_params_used, load_reservoir_defaults
 from .catalog import build_catalog, write_catalog, load_catalog, append_row
 from .narma_io import new_narma_dir, iter_narma_dirs, find_narma_by_seed, save_narma_params
+from .seeds import trial_seeds, set_seed_scheme, current_scheme, check_unique, load_seed_policy
 from .correlation import (correlation_at_lag, compute_correlation_decay,
                           load_position_dat, compute_adjacency_from_positions)
 from .plotting import (
@@ -34,6 +35,7 @@ __all__ = [
     "new_narma_dir", "iter_narma_dirs", "find_narma_by_seed", "save_narma_params",
     "correlation_at_lag", "compute_correlation_decay",
     "load_position_dat", "compute_adjacency_from_positions",
+    "trial_seeds", "set_seed_scheme", "current_scheme", "check_unique", "load_seed_policy",
     "apply_style",
     "plot_correlation_decay_all", "plot_correlation_vs_rcut",
     "plot_correlation_by_rcut_single_seed",

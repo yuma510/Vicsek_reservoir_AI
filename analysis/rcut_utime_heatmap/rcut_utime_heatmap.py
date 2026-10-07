@@ -21,6 +21,7 @@ import pandas as pd
 from vicsek_rc import (evaluate_reservoir, write_params_used, load_reservoir_defaults,
                        new_narma_dir, iter_narma_dirs, save_narma_params)
 from vicsek_rc.catalog import append_row
+from vicsek_rc.seeds import trial_seeds as seeds_for, set_seed_scheme  # 試行 b → seed（seed_policy.json）
 from generate_narma10 import generate_narma10 as _narma10_gen
 
 BINARY = str(ROOT / "vicsek_dynamic")
@@ -95,9 +96,9 @@ def _run_one_sim(args):
         "v0":          0.0,
         "utime":       int(utime),
         "ntime":       NARMA_LENGTH * int(utime),
-        "seed_noise":  seed + 2,
-        "seed_pos":    seed + 3,
-        "seed_nf":     seed + 6,
+        "seed_noise":  seeds_for(seed)["seed_noise"],
+        "seed_pos":    seeds_for(seed)["seed_pos"],
+        "seed_nf":     seeds_for(seed)["seed_nf"],
     }
     fd, cfg_path = tempfile.mkstemp(suffix=".json")
     try:
@@ -126,7 +127,7 @@ def phase1_simulate(rcut_values, utime_values, trial_seeds, narma_paths, data_di
     for r in rcut_values:
         for u in utime_values:
             for s in trial_seeds:
-                if _find_exp_utime(data_dir, r, u, s + 3) is not None:
+                if _find_exp_utime(data_dir, r, u, seeds_for(s)["seed_pos"]) is not None:
                     print(f"[SIM skip] rcut={r} utime={u} seed={s} (exists)", flush=True)
                     continue
                 jobs.append((r, u, s, narma_paths[s][0], data_dir))
@@ -173,7 +174,7 @@ def phase2_evaluate(rcut_values, utime_values, trial_seeds, narma_paths, data_di
             for seed in trial_seeds:
                 key = f"rcut={rcut:g}_utime={int(utime)}_seed={seed}"
 
-                exp_dir = _find_exp_utime(data_dir, rcut, utime, seed + 3)
+                exp_dir = _find_exp_utime(data_dir, rcut, utime, seeds_for(seed)["seed_pos"])
                 if exp_dir is None:
                     print(f"[MISS] no dir for {key}", flush=True)
                     continue
@@ -219,6 +220,7 @@ def phase3_plot(results, rcut_values, utime_values, output_dir):
     df_mean = df.groupby(["rcut", "utime"])[["MC_test", "NRMSE_test"]].mean().reset_index()
 
     plot_metric_vs_utime(df, output_dir)
+    plot_metric_vs_utime_scatter(df, output_dir)
 
     for metric, fname, cmap, fmt in [
         ("MC_test",    "heatmap_mc.png",    "Blues",   ".2f"),
@@ -236,9 +238,11 @@ def phase3_plot(results, rcut_values, utime_values, output_dir):
         ax.set_xticklabels([str(r) for r in sorted(rcut_values)])
         ax.set_yticks(range(len(utime_values)))
         ax.set_yticklabels([str(u) for u in sorted(utime_values)])
-        ax.set_xlabel("rcut")
-        ax.set_ylabel("utime")
-        ax.set_title(f"{metric} (seed mean, v0=0, sgm=0)")
+        ax.set_xlabel("rcut (interaction radius)")
+        ax.set_ylabel("utime (simulation steps per input value)")
+        ax.set_title(f"{metric} (mean over trial seeds, v0=0, sgm=0)")
+        fig.text(0.01, 0.005, "MC_test: memory capacity on test interval,  NRMSE_test: NARMA10 normalized RMSE,  "
+                 "v0: self-propulsion speed,  sgm: noise strength", fontsize=7, color="#52514e")
         plt.colorbar(im, ax=ax)
 
         for i, utime in enumerate(sorted(utime_values)):
@@ -294,6 +298,45 @@ def plot_metric_vs_utime(df, output_dir):
         print(f"  {fname}", flush=True)
 
 
+def plot_metric_vs_utime_scatter(df, output_dir):
+    """エラーバーの代わりに、試行ごとの値を点で描く（rcut ごとに 1 枚、MC と NRMSE）。
+
+    点の色と形で試行（trial seed）を区別し、灰色の線で試行平均を示す。元データは heatmap_data.csv。
+    """
+    seed_colors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+    markers = ["o", "s", "^", "D", "v", "P", "X", "*"]
+    for rcut, g in df.groupby("rcut"):
+        for col, label, fname in [
+            ("MC_test", "MC_test (memory capacity on test interval)", "mc_vs_utime_scatter"),
+            ("NRMSE_test", "NRMSE_test (NARMA10 normalized RMSE on test interval)", "nrmse_vs_utime_scatter"),
+        ]:
+            fig, ax = plt.subplots(figsize=(7, 4.6))
+            mean = g.groupby("utime")[col].mean()
+            ax.plot(mean.index, mean.values, color="0.6", lw=1.2, zorder=1, label="mean over trials")
+            for i, (seed, gs) in enumerate(g.groupby("seed")):
+                gs = gs.sort_values("utime")
+                ax.scatter(gs["utime"], gs[col], s=28, color=seed_colors[i % len(seed_colors)],
+                           marker=markers[i % len(markers)], edgecolors="white", linewidths=0.6,
+                           zorder=2, label=f"trial seed b = {seed}")
+            ax.set_xlabel("utime (simulation steps per input value)")
+            ax.set_ylabel(label)
+            ax.set_ylim(bottom=0)
+            ax.set_title(f"rcut = {rcut:g}, v0=0, sgm=0 (each point = one trial)", loc="left", fontsize=10)
+            ax.grid(True, color="0.9", lw=0.6)
+            for sp in ("top", "right"):
+                ax.spines[sp].set_visible(False)
+            ax.legend(frameon=False, fontsize=8.5)
+            fig.text(0.01, 0.005,
+                     "rcut: interaction radius,  v0: self-propulsion speed,  sgm: noise strength\n"
+                     "trial seed b: simulation seeds from b (configs/seed_policy.json), NARMA input seed = b",
+                     fontsize=7, color="#52514e")
+            fig.tight_layout(rect=(0, 0.05, 1, 1))
+            suffix = "" if df["rcut"].nunique() == 1 else f"_rcut{rcut:g}"
+            fig.savefig(output_dir / f"{fname}{suffix}.png", dpi=150)
+            plt.close(fig)
+            print(f"  {fname}{suffix}.png", flush=True)
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────
 
 def parse_args():
@@ -301,6 +344,8 @@ def parse_args():
     p.add_argument("--rcut-values",  nargs="+", type=float, default=_CA["rcut_values"])
     p.add_argument("--utime-values", nargs="+", type=int,   default=_CA["utime_values"])
     p.add_argument("--trial-seeds",  nargs="+", type=int,   default=_CA["trial_seeds"])
+    p.add_argument("--seed-scheme", choices=["random64", "legacy"], default=None,
+                   help="試行の seed の規則（configs/seed_policy.json）。既定は random64。既存データの再評価は legacy")
     p.add_argument("--n-jobs",    type=int, default=4)
     p.add_argument("--data-dir",  default="data")
     p.add_argument("--output-dir", default="analysis/rcut_utime_heatmap")
@@ -308,11 +353,23 @@ def parse_args():
     p.add_argument("--skip-sim",  action="store_true")
     p.add_argument("--skip-eval", action="store_true", help="シミュレーションだけ行い評価・作図をしない")
     p.add_argument("--eval-jobs", type=int, default=4, help="評価の並列数（I/O 律速）")
+    p.add_argument("--replot", default=None, metavar="OUTPUT_DIR",
+                   help="既存の出力ディレクトリの heatmap_data.csv から、試行ごとの散布図だけを描き直す")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
+    set_seed_scheme(args.seed_scheme)
+    if args.replot:
+        # 既存の heatmap_data.csv から図だけ描き直す（評価はやり直さない）
+        out = Path(args.replot)
+        df = pd.read_csv(out / "heatmap_data.csv")
+        results = {f"{r.rcut}_{r.utime}_{r.seed}": {"rcut": r.rcut, "utime": r.utime, "seed": r.seed,
+                                                    "MC_test": r.MC_test, "nrmse_test": r.NRMSE_test}
+                   for r in df.itertuples()}
+        phase3_plot(results, sorted(df.rcut.unique()), sorted(df.utime.unique()), out)
+        return
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) / ts
 
@@ -348,7 +405,7 @@ def main():
             for utime in args.utime_values:
                 for seed in valid_seeds:
                     exp_dir = _find_exp_utime(
-                        Path(args.data_dir), rcut, utime, seed + 3)
+                        Path(args.data_dir), rcut, utime, seeds_for(seed)["seed_pos"])
                     if exp_dir and (exp_dir / "params_model.json").exists():
                         with open(exp_dir / "params_model.json") as f:
                             params_list.append(json.load(f))
