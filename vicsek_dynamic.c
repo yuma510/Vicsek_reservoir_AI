@@ -106,65 +106,98 @@ static void build_linked_list(particle_t *particle, int N, int M, int ncell,
 
     double celli = (double)M;
     for (int i = 0; i < N; i++) {
-        int icell = 1 + (int)((particle[i].x / boxsize) * celli)
-                      + (int)((particle[i].y / boxsize) * celli) * M;
+        int ix = (int)((particle[i].x / boxsize) * celli);
+        int iy = (int)((particle[i].y / boxsize) * celli);
+        if (ix < 0) ix = 0;
+        if (ix >= M) ix = M - 1;   /* 丸めで x == boxsize になった場合 */
+        if (iy < 0) iy = 0;
+        if (iy >= M) iy = M - 1;
+        int icell = 1 + ix + iy * M;
         list[i]   = head[icell];
         head[icell] = i;
     }
 }
 
-static void compute_interactions(double rcut, particle_t *particle, double *ft,
+static void compute_interactions_allpairs(double rcut, particle_t *particle, double *ft,
                                   int *list, int *head, int *map,
                                   int N, int ncell, double boxsize, int *A)
 {
+    /* 全ペアを 1 回だけ、最小イメージ(PBC)距離で判定する。
+       以前のセルリスト実装（M=1）は、セル内ループが生距離・隣接セルループが PBC 距離で
+       同一ペアを多重カウントし、かつ生距離判定が位置依存（rcut>boxsize/2 で顕著）だった。
+       ここでは各無向ペアを 1 回だけ数えることで二重カウントと生/PBC 不整合を解消する。
+       (list/head/map/ncell は後方互換のため引数に残すが未使用) */
+    (void)list; (void)head; (void)map; (void)ncell;
     double count[N];
     for (int i = 0; i < N; i++) { ft[i] = 0.0; count[i] = 0.0; }
 
-    for (int icell = 1; icell <= ncell; icell++) {
-        int i = head[icell];
-        while (i > -1) {
-            double fi = ft[i];
-
-            for (int j = list[i]; j > -1; j = list[j]) {
-                double dx  = particle[j].x - particle[i].x;
-                double dy  = particle[j].y - particle[i].y;
-                double rij = sqrt(dx * dx + dy * dy);
-                if (rij < rcut) {
-                    double fij  = sin(particle[j].theta - particle[i].theta);
-                    fi         += fij;
-                    ft[j]      -= fij;
-                    count[i]   += 1.0;
-                    count[j]   += 1.0;
-                    A[i * N + j] = 1;
-                    A[j * N + i] = 1;
-                }
+    double rcut2 = rcut * rcut;
+    for (int i = 0; i < N; i++) {
+        for (int j = i + 1; j < N; j++) {
+            double dx = particle[j].x - particle[i].x;
+            double dy = particle[j].y - particle[i].y;
+            if (dx >  boxsize * 0.5) dx -= boxsize;
+            if (dx <= -boxsize * 0.5) dx += boxsize;
+            if (dy >  boxsize * 0.5) dy -= boxsize;
+            if (dy <= -boxsize * 0.5) dy += boxsize;
+            if (dx * dx + dy * dy < rcut2) {
+                double fij = sin(particle[j].theta - particle[i].theta);
+                ft[i]    += fij;
+                ft[j]    -= fij;
+                count[i] += 1.0;
+                count[j] += 1.0;
+                if (A) { A[i * N + j] = 1; A[j * N + i] = 1; }
             }
+        }
+    }
 
+    for (int i = 0; i < N; i++)
+        if (count[i] > 0.0) ft[i] /= count[i];
+}
+
+/* 1 ペアの寄与（最小イメージ距離で判定）。セルリスト版から使う */
+static inline void add_pair(int i, int j, const particle_t *particle, double boxsize,
+                            double rcut2, double *ft, double *count, int *A, int N)
+{
+    double dx = particle[j].x - particle[i].x;
+    double dy = particle[j].y - particle[i].y;
+    if (dx >  boxsize * 0.5) dx -= boxsize;
+    if (dx <= -boxsize * 0.5) dx += boxsize;
+    if (dy >  boxsize * 0.5) dy -= boxsize;
+    if (dy <= -boxsize * 0.5) dy += boxsize;
+    if (dx * dx + dy * dy < rcut2) {
+        double fij = sin(particle[j].theta - particle[i].theta);
+        ft[i]    += fij;
+        ft[j]    -= fij;
+        count[i] += 1.0;
+        count[j] += 1.0;
+        if (A) { A[i * N + j] = 1; A[j * N + i] = 1; }
+    }
+}
+
+/* セルリスト版（2026-10-06 追加）。M = floor(boxsize/rcut) ≥ 3 のときだけ使う。
+   各セルについて「同じセル内のペア（リスト上で後ろの粒子のみ）」と「前方 4 セル（右・右上・上・左上）の粒子」を見る
+   標準的な半殻法で、各無向ペアを 1 回だけ数える。距離は常に最小イメージで判定する。
+   M ≥ 3 なら前方 4 セルは互いに異なり自セルとも重ならないので、二重カウントは起きない。
+   全ペア版と同じ近傍集合・同じ ft になる（足し合わせる順序だけが違う）。 */
+static void compute_interactions_cell(double rcut, particle_t *particle, double *ft,
+                                      int *list, int *head, int *map,
+                                      int N, int ncell, double boxsize, int *A)
+{
+    double count[N];
+    for (int i = 0; i < N; i++) { ft[i] = 0.0; count[i] = 0.0; }
+    double rcut2 = rcut * rcut;
+
+    for (int icell = 1; icell <= ncell; icell++) {
+        for (int i = head[icell]; i > -1; i = list[i]) {
+            for (int j = list[i]; j > -1; j = list[j])
+                add_pair(i, j, particle, boxsize, rcut2, ft, count, A, N);
             int jcell0 = 4 * (icell - 1);
             for (int nb = 1; nb <= 4; nb++) {
                 int jcell = map[jcell0 + nb];
-                for (int j = head[jcell]; j > -1; j = list[j]) {
-                    if (j == i) continue;
-                    double rxij = particle[j].x - particle[i].x;
-                    double ryij = particle[j].y - particle[i].y;
-                    if (rxij >  boxsize * 0.5) rxij -= boxsize;
-                    if (rxij <= -boxsize * 0.5) rxij += boxsize;
-                    if (ryij >  boxsize * 0.5) ryij -= boxsize;
-                    if (ryij <= -boxsize * 0.5) ryij += boxsize;
-                    double rij = sqrt(rxij * rxij + ryij * ryij);
-                    if (rij < rcut) {
-                        double fij  = sin(particle[j].theta - particle[i].theta);
-                        fi         += fij;
-                        ft[j]      -= fij;
-                        count[i]   += 1.0;
-                        count[j]   += 1.0;
-                        A[i * N + j] = 1;
-                        A[j * N + i] = 1;
-                    }
-                }
+                for (int j = head[jcell]; j > -1; j = list[j])
+                    add_pair(i, j, particle, boxsize, rcut2, ft, count, A, N);
             }
-            ft[i] = fi;
-            i = list[i];
         }
     }
 
@@ -218,8 +251,8 @@ static void load_input(const char *filename, double *u, int n)
 
 static void write_params(const char *filename, int model, int N, int n_driver, double boxsize,
                           long ntime, int utime, double h1, double v0, double sgm,
-                          double K, double F, double c, double rcut, double rho,
-                          long seed_noise, long seed_pos, long seed_nf,
+                          double K, double F, double c, double rcut, double rho, double nf_mean,
+                          double nf_sigma, long seed_noise, long seed_pos, long seed_nf,
                           int write_adjacency,
                           const char *input_file)
 {
@@ -241,14 +274,16 @@ static void write_params(const char *filename, int model, int N, int n_driver, d
         "  \"c\": %.6f,\n"
         "  \"rcut\": %.6f,\n"
         "  \"rho\": %.6f,\n"
+        "  \"nf_mean\": %.6f,\n"
+        "  \"nf_sigma\": %.6f,\n"
         "  \"seed_noise\": %ld,\n"
         "  \"seed_pos\": %ld,\n"
         "  \"seed_nf\": %ld,\n"
         "  \"write_adjacency\": %d,\n"
         "  \"input_file\": \"%s\"\n"
         "}\n",
-        model, N, n_driver, boxsize, ntime, utime, h1, v0, sgm, K, F, c, rcut, rho,
-        seed_noise, seed_pos, seed_nf, write_adjacency, input_file);
+        model, N, n_driver, boxsize, ntime, utime, h1, v0, sgm, K, F, c, rcut, rho, nf_mean,
+        nf_sigma, seed_noise, seed_pos, seed_nf, write_adjacency, input_file);
     fclose(fp);
 }
 
@@ -307,6 +342,8 @@ typedef struct {
     int    N, n_driver, utime;
     long   ntime;
     double boxsize, rho, v0, K, F, c, h1, rcut, sgm;
+    double nf_mean;                        /* 自然周波数の平均係数: nf=2π(nf_sigma·N(0,1)+nf_mean) */
+    double nf_sigma;                       /* 自然周波数のばらつき係数（2026-10-06 追加。既定 1.0 = 従来） */
     long   seed_noise, seed_pos, seed_nf;  /* -1 = 未指定（デフォルト使用） */
     int    write_adjacency;               /* 0=off, 1=on */
 } cfg_t;
@@ -330,6 +367,8 @@ static cfg_t make_default_cfg(void)
     cfg.h1         = 0.01;
     cfg.rcut       = 1.0;
     cfg.sgm        = 0.0;
+    cfg.nf_mean    = 1.0;  /* 既定 1.0 = 従来（平均 2π） */
+    cfg.nf_sigma   = 1.0;  /* 既定 1.0 = 従来（標準偏差 2π）。0 で全粒子が同じ自然周波数 */
     cfg.seed_noise      = -1;
     cfg.seed_pos        = -1;
     cfg.seed_nf         = -1;
@@ -361,6 +400,8 @@ static void parse_config(const char *path, cfg_t *cfg)
         if (sscanf(line, " \"h1\": %lf",         &dv) == 1) cfg->h1         = dv;
         if (sscanf(line, " \"rcut\": %lf",       &dv) == 1) cfg->rcut       = dv;
         if (sscanf(line, " \"sgm\": %lf",        &dv) == 1) cfg->sgm        = dv;
+        if (sscanf(line, " \"nf_mean\": %lf",    &dv) == 1) cfg->nf_mean    = dv;
+        if (sscanf(line, " \"nf_sigma\": %lf",   &dv) == 1) cfg->nf_sigma   = dv;
         if (sscanf(line, " \"seed_noise\": %ld", &lv) == 1) cfg->seed_noise = lv;
         if (sscanf(line, " \"seed_pos\": %ld",   &lv) == 1) cfg->seed_pos   = lv;
         if (sscanf(line, " \"seed_nf\": %ld",          &lv) == 1) cfg->seed_nf         = lv;
@@ -384,7 +425,11 @@ int main(int argc, char *argv[])
     if (cfg.seed_nf    >= 0) seed_array[6] = cfg.seed_nf;
 
     const int model  = 1;
-    const int M      = 1;
+    /* セル数: rcut 以上の幅のセルが 3 個以上取れるときだけセルリストを使う（2026-10-06）。
+       取れないとき（rcut > boxsize/3）は全ペア版を使う */
+    int M_cells = (int)floor(cfg.boxsize / cfg.rcut);
+    const int use_cells = (M_cells >= 3);
+    const int M      = use_cells ? M_cells : 1;
     const int ncell  = M * M;
     const int mapsiz = 4 * ncell;
     const int ntime  = (int)cfg.ntime;
@@ -399,9 +444,11 @@ int main(int argc, char *argv[])
     double     *u        = malloc((size_t)n_input * sizeof(double));
     double     *v        = malloc((size_t)n_input * sizeof(double));
     double     *nf       = malloc((size_t)cfg.N * sizeof(double));
-    int        *A        = malloc((size_t)cfg.N * (size_t)cfg.N * sizeof(int));
+    /* 隣接行列は出力するときだけ確保する（N=2000 で 16 MB を毎ステップ消去するのを避ける） */
+    int        *A        = cfg.write_adjacency
+                           ? malloc((size_t)cfg.N * (size_t)cfg.N * sizeof(int)) : NULL;
 
-    if (!particle || !ft || !list || !head || !map || !u || !v || !nf || !A) {
+    if (!particle || !ft || !list || !head || !map || !u || !v || !nf || (cfg.write_adjacency && !A)) {
         fprintf(stderr, "Memory allocation failed\n");
         exit(1);
     }
@@ -411,7 +458,7 @@ int main(int argc, char *argv[])
 
     time_t t_start = time(NULL);
 
-    printf("rcut=%f sgm=%f\n", cfg.rcut, cfg.sgm);
+    printf("rcut=%f sgm=%f cells=%s (M=%d)\n", cfg.rcut, cfg.sgm, use_cells ? "on" : "off", M);
 
     char dirname[512], pos_file[768], params_file[768];
     create_output_dir(cfg.output_base, dirname, sizeof(dirname));
@@ -421,8 +468,8 @@ int main(int argc, char *argv[])
     if (cfg.n_driver < 0 || cfg.n_driver > cfg.N) cfg.n_driver = cfg.N;
 
     write_params(params_file, model, cfg.N, cfg.n_driver, cfg.boxsize, (long)ntime, cfg.utime,
-                 cfg.h1, cfg.v0, cfg.sgm, cfg.K, cfg.F, cfg.c, cfg.rcut, cfg.rho,
-                 seed_array[2], seed_array[3], seed_array[6], cfg.write_adjacency,
+                 cfg.h1, cfg.v0, cfg.sgm, cfg.K, cfg.F, cfg.c, cfg.rcut, cfg.rho, cfg.nf_mean,
+                 cfg.nf_sigma, seed_array[2], seed_array[3], seed_array[6], cfg.write_adjacency,
                  cfg.input_file);
 
     char adj_dir[768];
@@ -442,7 +489,7 @@ int main(int argc, char *argv[])
 
     initialize_particles(particle, cfg.N, cfg.boxsize, &rng_pos);
     for (int i = 0; i < cfg.N; i++) {
-        nf[i] = 2.0 * PI * (xrng_normal(&rng_nf) + 1.0);
+        nf[i] = 2.0 * PI * (cfg.nf_sigma * xrng_normal(&rng_nf) + cfg.nf_mean);
     }
 
     int countloop = 0;
@@ -450,10 +497,15 @@ int main(int argc, char *argv[])
     for (double times = 0.0; times < tm - cfg.h1 / 2.0; times += cfg.h1) {
         int t_idx = countloop / cfg.utime;
 
-        memset(A, 0, (size_t)cfg.N * (size_t)cfg.N * sizeof(int));
-        build_linked_list(particle, cfg.N, M, ncell, cfg.boxsize, list, head);
-        compute_interactions(cfg.rcut, particle, ft, list, head, map,
-                             cfg.N, ncell, cfg.boxsize, A);
+        if (A) memset(A, 0, (size_t)cfg.N * (size_t)cfg.N * sizeof(int));
+        if (use_cells) {
+            build_linked_list(particle, cfg.N, M, ncell, cfg.boxsize, list, head);
+            compute_interactions_cell(cfg.rcut, particle, ft, list, head, map,
+                                      cfg.N, ncell, cfg.boxsize, A);
+        } else {
+            compute_interactions_allpairs(cfg.rcut, particle, ft, list, head, map,
+                                          cfg.N, ncell, cfg.boxsize, A);
+        }
 
         v[t_idx] = 4.0 * (u[t_idx] - 0.25);
 
@@ -465,7 +517,7 @@ int main(int argc, char *argv[])
                 ? cfg.h1 * cfg.F * sin(cfg.c * v[t_idx] - particle[m].theta)
                 : 0.0;
             particle[m].theta += cfg.h1 * nf[m]
-                               + cfg.h1 * cfg.K / cfg.N * ft[m]
+                               + cfg.h1 * cfg.K * ft[m]
                                + input_term
                                + sqrt(cfg.h1) * cfg.sgm * xi;
             normalize_theta(&particle[m].theta);

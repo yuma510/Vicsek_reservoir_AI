@@ -16,7 +16,8 @@ import pandas as pd
 # index.csv の列順（既知の params_model.json スキーマに対応）。
 # スカラモデルパラメータ + seed（新旧フォーマット両対応）+ dir メタデータ。
 SCALAR_COLS = ["model", "N", "boxsize", "ntime", "utime", "h1",
-               "v0", "sgm", "K", "F", "c", "rcut", "rho"]
+               "v0", "sgm", "K", "F", "c", "rcut", "rho",
+               "nf_mean", "nf_sigma", "n_driver"]  # 2026-10-06: nf_mean/nf_sigma/n_driver を追加（無い旧シムは NaN）
 SEED_COLS   = ["seed_pos", "seed_noise", "seed_nf"]  # 新フォーマット
 META_COLS   = ["dir", "mtime", "size_MB", "has_position", "has_params"]
 
