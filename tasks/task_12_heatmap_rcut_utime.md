@@ -64,3 +64,31 @@ analysis/rcut_utime_heatmap/<YYYYMMDD_HHMMSS>/
     heatmap_nrmse.png   # NRMSE_test の rcut × utime ヒートマップ（同上）
     params_used.json    # 使用パラメータ（model fixed/swept + reservoir fixed）
 ```
+
+---
+
+## 追記: 結合修正後の rcut=1・utime 1〜30 掃引（2026-10-06）
+
+- 目的: 2026-10-02 の結合修正（`K/N` → `K`）の後も、utime に最適値があるかを確かめる
+- 条件: rcut=1、utime=1〜30（1 刻み）、v0=0、sgm=0、trial_seeds=[1,2,3]（seed_noise=b+2, seed_pos=b+3, seed_nf=b+6、NARMA seed=b）、
+  ntime=14000×utime、`data_newK/`。utime=10 は 2026-10-03 の rcut 掃引のシムを再利用し、残り 87 本を新規に実行
+- コマンド:
+  ```bash
+  python3 analysis/rcut_utime_heatmap/rcut_utime_heatmap.py --rcut-values 1 --utime-values $(seq 1 30) \
+      --data-dir data_newK --n-jobs 24 --skip-eval
+  python -m vicsek_rc.catalog --data-dir data_newK
+  python3 analysis/rcut_utime_heatmap/rcut_utime_heatmap.py --rcut-values 1 --utime-values $(seq 1 30) \
+      --data-dir data_newK --skip-sim --eval-jobs 8
+  ```
+- 出力: `analysis/rcut_utime_heatmap/20261006_160155/`（`mc_vs_utime.png`, `nrmse_vs_utime.png`, `metric_vs_utime.csv`, `heatmap_data.csv`）
+
+| utime | 1 | 5 | 10 | 15 | 20 | 24 | 28 | 30 |
+|---|---|---|---|---|---|---|---|---|
+| MC_test | 1.72±0.27 | 5.36±0.52 | 8.47±0.37 | 14.18±8.41 | 21.18±3.83 | 21.87±5.30 | 21.05±5.24 | 18.62±5.83 |
+| NRMSE_test | 0.211 | 0.155 | 0.154 | 0.173 | 0.180 | 0.191 | 0.197 | 0.201 |
+
+- MC は utime=10 まで直線的に増え、11〜17 で急増、18〜28 で 20〜22 の頭打ち。最大は utime=24（21.9）
+- NRMSE の最良は utime=7（0.1508）
+- 試行 2 は utime≥11 で一貫して低い（utime=20 で 17.4、他は 21.0・25.1）。utime=15 の試行 2 は 4.49 で外れ値
+- 修正前（2026-07-10、MC †）の「utime=20 でピーク、24.44†」と同じ傾向
+

@@ -120,3 +120,27 @@ analysis/correlation_analysis/<YYYYMMDD_HHMMSS>/
 
 rcut が大きいほど C(Δt) の減衰が遅くなる（ネットワークが安定）ことを確認。
 詳細プロットは `correlation_by_rcut_seed=4.png`・`correlation_decay_all.png`・`correlation_vs_rcut.png` を参照。
+
+---
+
+## 追記: 旧 `analysis/README.md`「実行結果メモ」から移した記録（2026-10-06）
+
+2026-10-06 の文書再編で `analysis/README.md` の実行結果メモを削除した。そのうち、このファイルになかった記述を原文のまま移す。
+
+### correlation_analysis 初回 — 2026-06-30
+
+- 出力: `analysis/correlation_analysis/20260630_202345/`、データ: `data/rcut_sweep/`（117 本）
+- position.dat の frame 2000–2500（washout 後の定常状態 500 フレーム）から adjacency を計算
+- dt_max=50、rcut=1~13 × 9 seeds（117 実験）
+- rcut=1: C(Δt=1)≈0.98, C(Δt=10)≈0.82（ネットワーク変化が速い）
+- rcut=13: C(Δt=1)=1.0, C(Δt=10)=1.0（完全連結・固定ネットワーク）
+- rcut が大きいほどネットワークが安定し C(Δt) の減衰が遅くなる傾向を確認
+
+### correlation_analysis（dt_max=2000, 訓練区間全体）— 2026-07-15
+
+- 出力: `analysis/correlation_analysis/20260715_192338/`、データ: `data/`（v0=0.5, sgm=0, ntime=140000 の 118 実験）
+- フレーム 2000–8000（訓練区間 6001 フレーム、n_base=4001）、dt_max=2000
+- `compute_correlation_decay` を FFT 相互相関に高速化（推定量は旧実装と同値、~86 s/実験）
+- 各 rcut とも Δt≈500 までにプラトーへ到達し、以後ほぼ一定（周期的な小振動あり）
+- プラトー値（Δt=2000, seed 平均）: rcut=1: 0.02 / rcut=4: 0.21 / rcut=7: 0.62 / rcut=9: 0.92 / rcut≥11: 1.00
+- rcut≤3 は長時間でほぼ完全にネットワークが再編される一方、rcut≥8 は初期構造の大部分が残存
