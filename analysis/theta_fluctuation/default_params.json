@@ -1,0 +1,34 @@
+{
+  "data_dir": "data_newK",
+  "narma_root": "narma_data",
+  "narma_low": 0.0,
+  "narma_high": 0.5,
+  "model": {
+    "N": 500,
+    "boxsize": 15.8,
+    "rho": 2.0,
+    "ntime": 140000,
+    "utime": 10,
+    "h1": 0.01,
+    "v0": 0.0,
+    "K": 1.0,
+    "F": 14.3,
+    "c": 0.1,
+    "rcut": 13.0,
+    "nf_mean": 1.0
+  },
+  "input_modes": ["const", "narma"],
+  "sgm_values": [0.0, 0.01, 0.03, 0.1, 0.2, 0.3, 0.4, 0.5],
+  "trial_seeds": [1, 2, 3],
+  "seed_offsets": {"seed_noise": 2, "seed_pos": 3, "seed_nf": 6},
+  "lock_threshold": 1e-3,
+  "n_jobs": 6,
+  "min_free_gb": 20,
+  "cache_dir": "tmp/theta_fluctuation_cache",
+  "smoke": {
+    "ntime": 40000,
+    "output_base": "tmp/theta_fluctuation_smoke",
+    "runs": [["const", 0.0], ["const", 0.1], ["narma", 0.0]],
+    "trial_seed": 1
+  }
+}

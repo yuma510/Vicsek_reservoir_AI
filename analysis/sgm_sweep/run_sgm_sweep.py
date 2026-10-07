@@ -258,8 +258,6 @@ def parse_args():
                    metavar="S", help="sgm values to sweep (default: 0.0..0.5)")
     p.add_argument("--rcut", type=float, default=13,
                    help="fixed rcut value (default: 13)")
-    p.add_argument("--v0", type=float, default=0.5,
-                   help="fixed v0 value (default: 0.5; v0=0 実験の誤マッチ防止に使用)")
     p.add_argument("--seeds", nargs="+", type=int,
                    default=[10, 11, 12, 13, 14],
                    metavar="SD", help="noise seeds (seed_array[2])")
@@ -279,8 +277,8 @@ def parse_args():
                    help="NARMA10 target signal（未指定なら最新日付 dir から自動解決）")
     p.add_argument("--skip-sim", action="store_true",
                    help="skip simulation, only evaluate existing data")
-    p.add_argument("--v0", type=float, default=None,
-                   help="粒子速度 v0（未指定: default_params.json に従う）")
+    p.add_argument("--v0", type=float, default=0.5,
+                   help="粒子速度 v0（default 0.5; v0=0 実験の誤マッチ防止フィルタにも使用）")
     args = p.parse_args()
 
     if args.input_path is None or args.target_path is None:

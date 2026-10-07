@@ -1,0 +1,59 @@
+{
+  "data_dir": "data_newK",
+  "input_file": "narma_data/20261002_211137/const_input_mean-of-narma-s1_u0.250100.dat",
+  "base": {
+    "N": 2000,
+    "boxsize": 10.0,
+    "rho": 20.0,
+    "ntime": 200000,
+    "utime": 100,
+    "h1": 0.01,
+    "v0": 0.5,
+    "sgm": 1.0,
+    "F": 0.0,
+    "c": 0.1,
+    "rcut": 1.0,
+    "nf_sigma": 0.0
+  },
+  "K_values": [
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.6
+  ],
+  "Omega_values": [
+    0.0
+  ],
+  "trial_seeds": [
+    1,
+    2,
+    3
+  ],
+  "seed_offsets": {
+    "seed_noise": 2,
+    "seed_pos": 3,
+    "seed_nf": 6
+  },
+  "steady_frac": 0.5,
+  "n_jobs": 24,
+  "min_free_gb": 20,
+  "cache_dir": "tmp/no_input_transition_cache",
+  "e2_reference_csv": "../Vicsek_rotate/figures/fig3sm_20260724_174754/fig3sm_data.csv",
+  "smoke": {
+    "ntime": 5000,
+    "K_values": [
+      0.0,
+      1.1,
+      3.0
+    ],
+    "Omega_values": [
+      0.0
+    ],
+    "trial_seed": 1,
+    "output_base": "tmp/no_input_transition_smoke"
+  },
+  "_note": "段階1の定常性の確認（2026-10-07）: 転移付近を 4 倍長い時間（実時間 2000）で回し直す"
+}

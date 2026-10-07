@@ -150,16 +150,28 @@ def phase1_simulate(rcut_values, utime_values, trial_seeds, narma_paths, data_di
 
 # ── Phase 2: リザバー評価 ─────────────────────────────────────────────────
 
-def phase2_evaluate(rcut_values, utime_values, trial_seeds, narma_paths, data_dir, output_dir):
+def _eval_one(args):
+    key, rcut, utime, seed, pos_path, params, input_path, target_path = args
+    res = evaluate_reservoir(pos_path, params, target_path, input_path)
+    res["rcut"], res["utime"], res["seed"] = rcut, utime, seed
+    return key, res
+
+
+def phase2_evaluate(rcut_values, utime_values, trial_seeds, narma_paths, data_dir, output_dir,
+                    eval_jobs=1):
+    """各 (rcut, utime, seed) を evaluate_reservoir で評価する。
+
+    /mnt/d からの position.dat 読み込みが律速（1 本約 2 分）なので eval_jobs 並列で評価する。
+    """
     data_dir   = Path(data_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    results = {}
+    jobs = []
     for rcut in rcut_values:
         for utime in utime_values:
             for seed in trial_seeds:
-                key = f"rcut={int(rcut)}_utime={int(utime)}_seed={seed}"
+                key = f"rcut={rcut:g}_utime={int(utime)}_seed={seed}"
 
                 exp_dir = _find_exp_utime(data_dir, rcut, utime, seed + 3)
                 if exp_dir is None:
@@ -176,14 +188,16 @@ def phase2_evaluate(rcut_values, utime_values, trial_seeds, narma_paths, data_di
                     params = json.load(f)
 
                 input_path, target_path = narma_paths[seed]
-                print(f"[EVAL] {key} …", flush=True)
-                res = evaluate_reservoir(pos_path, params, target_path, input_path)
-                res["rcut"]  = rcut
-                res["utime"] = utime
-                res["seed"]  = seed
-                results[key] = res
-                print(f"       NRMSE_test={res['nrmse_test']:.4f}  MC_test={res['MC_test']:.3f}",
-                      flush=True)
+                jobs.append((key, rcut, utime, seed, pos_path, params, input_path, target_path))
+
+    results = {}
+    with ProcessPoolExecutor(max_workers=eval_jobs) as ex:
+        futures = [ex.submit(_eval_one, j) for j in jobs]
+        for f in as_completed(futures):
+            key, res = f.result()
+            results[key] = res
+            print(f"[EVAL {len(results)}/{len(jobs)}] {key}  NRMSE_test={res['nrmse_test']:.4f}  "
+                  f"MC_test={res['MC_test']:.3f}", flush=True)
 
     return results
 
@@ -203,6 +217,8 @@ def phase3_plot(results, rcut_values, utime_values, output_dir):
     print("  heatmap_data.csv", flush=True)
 
     df_mean = df.groupby(["rcut", "utime"])[["MC_test", "NRMSE_test"]].mean().reset_index()
+
+    plot_metric_vs_utime(df, output_dir)
 
     for metric, fname, cmap, fmt in [
         ("MC_test",    "heatmap_mc.png",    "Blues",   ".2f"),
@@ -238,6 +254,46 @@ def phase3_plot(results, rcut_values, utime_values, output_dir):
         print(f"  {fname}", flush=True)
 
 
+def plot_metric_vs_utime(df, output_dir):
+    """rcut ごとに、横軸 utime・縦軸 MC_test / NRMSE_test（試行平均 ± 標準偏差）の線グラフを描く。
+
+    元データは heatmap_data.csv（試行ごとの値）。集計値は metric_vs_utime.csv に保存する。
+    """
+    agg = (df.groupby(["rcut", "utime"])
+             .agg(MC_mean=("MC_test", "mean"), MC_std=("MC_test", "std"),
+                  NRMSE_mean=("NRMSE_test", "mean"), NRMSE_std=("NRMSE_test", "std"),
+                  n_seeds=("seed", "nunique"))
+             .reset_index())
+    agg.to_csv(output_dir / "metric_vs_utime.csv", index=False)
+
+    colors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+    for col, fname, ylabel in [
+        ("MC", "mc_vs_utime.png", "MC_test (memory capacity on test interval)"),
+        ("NRMSE", "nrmse_vs_utime.png", "NRMSE_test (NARMA10 normalized RMSE on test interval)"),
+    ]:
+        fig, ax = plt.subplots(figsize=(7, 4.6))
+        for i, (rcut, g) in enumerate(agg.groupby("rcut")):
+            g = g.sort_values("utime")
+            ax.errorbar(g["utime"], g[f"{col}_mean"], yerr=g[f"{col}_std"].fillna(0),
+                        color=colors[i % len(colors)], marker="o", ms=5, lw=2, capsize=2.5,
+                        mec="white", mew=0.8, label=f"rcut = {rcut:g}")
+        ax.set_xlabel("utime (simulation steps per input value)")
+        ax.set_ylabel(ylabel)
+        ax.set_ylim(bottom=0)
+        n = int(agg["n_seeds"].max())
+        ax.set_title(f"v0=0, sgm=0 (mean ± std over {n} trial seeds)", loc="left", fontsize=10)
+        ax.grid(True, color="0.9", lw=0.6)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+        ax.legend(frameon=False, fontsize=9)
+        fig.text(0.01, 0.005, "rcut: interaction radius,  v0: self-propulsion speed,  sgm: noise strength",
+                 fontsize=7.5, color="#52514e")
+        fig.tight_layout(rect=(0, 0.03, 1, 1))
+        fig.savefig(output_dir / fname, dpi=150)
+        plt.close(fig)
+        print(f"  {fname}", flush=True)
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────
 
 def parse_args():
@@ -250,6 +306,8 @@ def parse_args():
     p.add_argument("--output-dir", default="analysis/rcut_utime_heatmap")
     p.add_argument("--narma-dir", default="narma_data")
     p.add_argument("--skip-sim",  action="store_true")
+    p.add_argument("--skip-eval", action="store_true", help="シミュレーションだけ行い評価・作図をしない")
+    p.add_argument("--eval-jobs", type=int, default=4, help="評価の並列数（I/O 律速）")
     return p.parse_args()
 
 
@@ -257,7 +315,6 @@ def main():
     args = parse_args()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) / ts
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     narma_paths = {s: ensure_narma10(s, args.narma_dir) for s in args.trial_seeds}
     valid_seeds = [s for s, (ip, _) in narma_paths.items() if ip is not None]
@@ -269,8 +326,13 @@ def main():
         phase1_simulate(args.rcut_values, args.utime_values, valid_seeds,
                         narma_paths, args.data_dir, args.n_jobs)
 
+    if args.skip_eval:
+        print(f"--skip-eval: simulations only. Rebuild the catalog, then rerun with --skip-sim.", flush=True)
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
     results = phase2_evaluate(args.rcut_values, args.utime_values, valid_seeds,
-                              narma_paths, args.data_dir, output_dir)
+                              narma_paths, args.data_dir, output_dir, args.eval_jobs)
 
     if results:
         phase3_plot(results, args.rcut_values, args.utime_values, output_dir)

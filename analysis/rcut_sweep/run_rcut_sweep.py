@@ -143,12 +143,26 @@ def phase1_simulate(rcut_values, trial_seeds, narma_paths, data_dir, n_jobs, v0=
 
 # ── Phase 2: リザバー評価 ─────────────────────────────────────────────────
 
-def phase2_evaluate(rcut_values, trial_seeds, narma_paths, data_dir, output_dir, v0=0.5):
+def _eval_one(args):
+    key, rcut, seed, pos_path, params, input_path, target_path, out_file = args
+    res = evaluate_reservoir(pos_path, params, target_path, input_path)
+    res["rcut"] = rcut
+    res["seed"] = seed
+    with open(out_file, "w") as f:
+        json.dump(res, f, indent=2)
+    return key, res
+
+
+def phase2_evaluate(rcut_values, trial_seeds, narma_paths, data_dir, output_dir, v0=0.5,
+                    eval_jobs=1):
+    """各 (rcut, seed) を評価する。position.dat の読み込みが律速（/mnt/d で 1 本約 2 分）なので
+    eval_jobs 並列で評価する（2026-10-06 追加。選択規則とキャッシュは従来どおり）。"""
     data_dir   = Path(data_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     results = {}
+    jobs = []
     for rcut in rcut_values:
         for seed in trial_seeds:
             key      = f"rcut={int(rcut)}_seed={seed}"
@@ -180,14 +194,14 @@ def phase2_evaluate(rcut_values, trial_seeds, narma_paths, data_dir, output_dir,
                 params = json.load(f)
 
             input_path, target_path = narma_paths[seed]
-            print(f"[EVAL] {key} …", flush=True)
-            res = evaluate_reservoir(pos_path, params, target_path, input_path)
-            res["rcut"] = rcut
-            res["seed"] = seed
-            with open(out_file, "w") as f:
-                json.dump(res, f, indent=2)
+            jobs.append((key, rcut, seed, pos_path, params, input_path, target_path, out_file))
+
+    with ProcessPoolExecutor(max_workers=eval_jobs) as ex:
+        futs = [ex.submit(_eval_one, j) for j in jobs]
+        for i, fut in enumerate(as_completed(futs), 1):
+            key, res = fut.result()
             results[key] = res
-            print(f"       NRMSE_test={res['nrmse_test']:.4f}  MC_test={res['MC_test']:.3f}",
+            print(f"[EVAL {i}/{len(jobs)}] {key}  NRMSE_test={res['nrmse_test']:.4f}  MC_test={res['MC_test']:.3f}",
                   flush=True)
 
     return results
@@ -303,6 +317,8 @@ def parse_args():
                    help="NARMA10 入力・正解ファイルの保存先（trial seedごとに自動生成）")
     p.add_argument("--skip-sim", action="store_true",
                    help="skip simulation phase, only evaluate existing data")
+    p.add_argument("--eval-jobs", type=int, default=1,
+                   help="評価の並列数（position.dat の読み込みが律速）")
     p.add_argument("--v0", type=float, default=0.5,
                    help="particle speed (default: 0.5; use 0.0 for static network)")
     return p.parse_args()
@@ -330,7 +346,8 @@ def main():
                         narma_paths, args.data_dir, args.n_jobs, args.v0)
 
     results = phase2_evaluate(args.rcut_values, valid_seeds,
-                              narma_paths, args.data_dir, output_dir, v0=args.v0)
+                              narma_paths, args.data_dir, output_dir, v0=args.v0,
+                              eval_jobs=args.eval_jobs)
 
     if results:
         phase3_plot(results, args.rcut_values, output_dir)
